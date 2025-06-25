@@ -1,22 +1,15 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import {
-    calculateSMA,
-    calculateRSI,
-    calculateMACD,
-    calculateATR,
-    isBullishEngulfing,
-    Candle,
-} from 'src/utils/indicators';
+import * as indicators from 'src/utils/indicators';
 import { TradeSignal } from '../interfaces/traide-signal.interface';
 import { StrategyCallback } from '../interfaces/strategy-callback.interface';
 
 @Injectable()
 export class StrategyService implements OnModuleInit, StrategyCallback {
     private readonly logger = new Logger(StrategyService.name);
-    private candles: Candle[] = [];
+    private candles: indicators.Candle[] = [];
     private readonly maxCandles = 50;
-    private lastCandle: Candle | null = null;
+    private lastCandle: indicators.Candle | null = null;
     private readonly capital = 50;
     private readonly riskPerTrade = 0.01;
 
@@ -29,10 +22,9 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         this.logger.log('Estrategia inicializada.');
     }
 
-    processCandle(candle: Candle) {
+    processCandle(candle: indicators.Candle) {
         this.candles.push(candle);
         if (this.candles.length > this.maxCandles) this.candles.shift();
-        console.log(`Procesando vela: ${candle.close} (${this.candles.length} velas en total)`);
 
         const closes = this.candles.map((c) => c.close);
         if (closes.length < 26) {
@@ -41,11 +33,11 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         }
 
         // Indicadores
-        const smaShort = calculateSMA(closes, 5);
-        const smaLong = calculateSMA(closes, 20);
-        const rsi = calculateRSI(closes, 14);
-        const macd = calculateMACD(closes);
-        const atr = calculateATR(this.candles);
+        const smaShort = indicators.calculateSMA(closes, 5);
+        const smaLong = indicators.calculateSMA(closes, 20);
+        const rsi = indicators.calculateRSI(closes, 14);
+        const macd = indicators.calculateMACD(closes);
+        const atr = indicators.calculateATR(this.candles);
 
         if ([smaShort, smaLong, rsi, macd, atr].some((val) => val === null)) {
             this.logger.debug('No hay suficientes datos para calcular indicadores.');
@@ -61,32 +53,41 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         const isDowntrend = smaShort! < smaLong! && latestMACD < latestSignal;
 
         // Confirmación velas
-        const bullishEngulfing = isBullishEngulfing(this.candles);
-
+        const bullishEngulfing = indicators.isBullishEngulfing(this.candles);
         // Condiciones para compra
         const priceRatio = candle.close / (this.lastCandle?.close || candle.close);
         const volumeRatio = this.lastCandle?.volume
             ? candle.volume / this.lastCandle.volume
             : 1;
 
+        const COMMISSION = 0.001; // 0.1% por operación
+        const PROFIT_MARGIN = 0.002; // 0.2% extra sobre la comisión
+
+        // Busca la última señal de compra activa
+        const lastBuySignal = this.activeSignals.find(sig => sig.side === 'buy');
+        const minSellPrice = lastBuySignal
+            ? lastBuySignal.price * (1 + 2 * COMMISSION + PROFIT_MARGIN)
+            : 0;
+
         const isBuySignal =
-            priceRatio <= 0.999 &&
+            priceRatio <= 1.001 &&
             candle.close > candle.open &&
-            volumeRatio > 1.1 &&
+            // volumeRatio > 1.1 &&
             isUptrend &&
-            rsi! > 40 &&
-            rsi! < 70 && // rango más estricto
+            rsi! > 35 &&
+            rsi! < 75 &&
             bullishEngulfing;
 
         // Condiciones para venta
         const isSellSignal =
             priceRatio >= 1.001 &&
             candle.close < candle.open &&
-            volumeRatio > 1.1 &&
+            // volumeRatio > 1.1 &&
             isDowntrend &&
             rsi! > 30 &&
             rsi! < 60 &&
-            !bullishEngulfing;
+            !bullishEngulfing &&
+            candle.close > minSellPrice;
 
         if (isBuySignal && this.preValidateSignal('buy', candle.close, atr!)) {
             this.logger.log(`🟢 Señal de COMPRA validada a ${candle.close.toFixed(2)}`);
@@ -95,8 +96,21 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
             isSellSignal &&
             this.preValidateSignal('sell', candle.close, atr!)
         ) {
-            this.logger.log(`🔴 Señal de VENTA validada a ${candle.close.toFixed(2)}`);
-            this.emitTradeSignal('sell', candle.close, atr!);
+            // Simula la operación para validar ganancia neta
+            const sellPrice = Math.max(candle.close, minSellPrice);
+            const lastBuy = lastBuySignal?.price ?? 0;
+            const capitalAfterBuy = this.capital - this.capital * COMMISSION;
+            const size = capitalAfterBuy / lastBuy;
+            const profit = (sellPrice - lastBuy) * size;
+            const capitalAfterSell = capitalAfterBuy + profit - (capitalAfterBuy + profit) * COMMISSION;
+
+            // Solo emite la señal si la ganancia neta es positiva
+            if (lastBuySignal && candle.close > lastBuySignal.price * (1 + 2 * COMMISSION + PROFIT_MARGIN)) {
+                this.logger.log(`🔴 Señal de VENTA validada a ${sellPrice.toFixed(2)} (ganancia neta asegurada)`);
+                this.emitTradeSignal('sell', sellPrice, atr!, lastBuySignal.id);
+            } else {
+                this.logger.log(`❌ Venta descartada: no deja ganancia neta (capital final sería ${capitalAfterSell.toFixed(2)})`);
+            }
         }
 
         this.lastCandle = candle;
@@ -135,7 +149,8 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
 
         // Confirmación técnica adicional: por ejemplo, RSI en rango óptimo
         const closes = this.candles.map(c => c.close);
-        const rsi = calculateRSI(closes, 14);
+        const rsi = indicators.calculateRSI(closes, 14);
+
         if (rsi === null) return false;
 
         if (side === 'buy' && (rsi < 40 || rsi > 65)) {
@@ -151,7 +166,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         // Validación de riesgo: el tamaño de la posición no debe ser demasiado grande (ej: > 10 unidades)
         const riskAmount = this.capital * this.riskPerTrade;
         const positionSize = riskAmount / Math.abs(price - (side === 'buy' ? price * 0.97 : price * 1.03));
-        if (positionSize > 10) {
+        if (positionSize > 20) {
             this.logger.debug(`Señal ${side} descartada: tamaño de posición excesivo (${positionSize.toFixed(2)}).`);
             return false;
         }
@@ -161,7 +176,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
     }
 
 
-    private emitTradeSignal(side: 'buy' | 'sell', price: number, atr: number) {
+    private emitTradeSignal(side: 'buy' | 'sell', price: number, atr: number, id?: string) {
         if (this.activeSignals.length >= this.maxActiveSignals) {
             this.logger.warn(
                 '⚠️ Límite de señales activas alcanzado. No se emite nueva señal.',
@@ -182,6 +197,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         const positionSize = riskAmount / Math.abs(price - stopLoss);
 
         const tradeSignal: TradeSignal = {
+            id: id || (Date.now().toString() + Math.random().toString(36).slice(2)),
             symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
             price,
             size: positionSize,
@@ -190,12 +206,12 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
             side,
             paperTrading: true,
         };
-
+        console.log(`Nueva señal ${side}:`, tradeSignal);
         this.activeSignals.push(tradeSignal);
         this.eventEmitter.emit(`trade.${side}`, tradeSignal);
     }
 
     public closeSignal(signalId: string) {
-        this.activeSignals = this.activeSignals.filter((sig) => sig.symbol !== signalId);
+        this.activeSignals = this.activeSignals.filter((sig) => sig.id !== signalId);
     }
 }
