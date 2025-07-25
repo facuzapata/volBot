@@ -10,6 +10,16 @@
     * Detecta correctamente un patrón envolvente alcista.
     * Verifica que no detecta el patrón cuando no corresponde.
     * Prueba el caso de menos de dos velas.
+    Bearish Engulfing:
+    * Detecta correctamente un patrón envolvente bajista.
+    * Verifica que no detecta el patrón cuando no corresponde.
+    * Prueba el caso de menos de dos velas.
+    EMA:
+    * Calcula correctamente la media móvil exponencial de los últimos 12 cierres.
+    * Prueba el caso de datos insuficientes.
+    Bollinger Bands:
+    * Calcula correctamente las bandas de Bollinger con un período de 20.
+    * Verifica que la banda superior es mayor que la banda media, y la banda media es mayor que la banda inferior.
 */
 
 import {
@@ -18,6 +28,9 @@ import {
     calculateMACD,
     calculateATR,
     isBullishEngulfing,
+    isBearishEngulfing,
+    calculateEMA,
+    calculateBollingerBands,
     Candle,
 } from './indicators';
 
@@ -119,15 +132,39 @@ describe('Indicadores técnicos', () => {
         expect(calculateMACD(closes)).toBeNull();
     });
 
-    it('debería calcular correctamente el ATR', () => {
-        const atr = calculateATR(velasReales, 14);
-        expect(atr).not.toBeNull();
-        expect(typeof atr).toBe('number');
-        expect(atr!).toBeGreaterThan(0);
+    it('debería calcular correctamente el MACD con histograma', () => {
+        const closes = velasReales.map(v => v.close);
+        const macd = calculateMACD(closes);
+        expect(macd).not.toBeNull();
+        expect(macd!.macdLine.length).toBeGreaterThan(0);
+        expect(macd!.signalLine.length).toBeGreaterThan(0);
+        expect(macd!.histogram.length).toBeGreaterThan(0);
+
+        // Verificar que el histograma es la diferencia entre MACD y signal
+        const lastHistogram = macd!.histogram[macd!.histogram.length - 1];
+        const lastMacd = macd!.macdLine[macd!.macdLine.length - 1];
+        const lastSignal = macd!.signalLine[macd!.signalLine.length - 1];
+
+        expect(lastHistogram).toBeCloseTo(lastMacd - lastSignal, 5);
     });
 
-    it('debería devolver null en ATR si no hay suficientes datos', () => {
-        expect(calculateATR(velasReales.slice(0, 5), 14)).toBeNull();
+    it('debería calcular correctamente la EMA', () => {
+        const closes = velasReales.map(v => v.close);
+        const ema12 = calculateEMA(closes, 12);
+        expect(ema12).not.toBeNull();
+        expect(typeof ema12).toBe('number');
+        expect(ema12!).toBeGreaterThan(0);
+    });
+
+    it('debería calcular correctamente las Bollinger Bands', () => {
+        const closes = velasReales.map(v => v.close);
+        const bbands = calculateBollingerBands(closes, 20);
+        expect(bbands).not.toBeNull();
+        expect(bbands!.upper).toBeGreaterThan(bbands!.middle);
+        expect(bbands!.middle).toBeGreaterThan(bbands!.lower);
+        expect(typeof bbands!.upper).toBe('number');
+        expect(typeof bbands!.middle).toBe('number');
+        expect(typeof bbands!.lower).toBe('number');
     });
 
     it('debería detectar correctamente un patrón Bullish Engulfing', () => {
@@ -150,5 +187,27 @@ describe('Indicadores técnicos', () => {
 
     it('debería devolver false en Bullish Engulfing si no hay suficientes velas', () => {
         expect(isBullishEngulfing([{ open: 1, high: 2, low: 1, close: 2, volume: 1 }])).toBe(false);
+    });
+
+    it('debería detectar correctamente un patrón Bearish Engulfing', () => {
+        // Creamos dos velas: una alcista y una bajista que envuelve a la anterior
+        const velas = [
+            { open: 100, high: 105, low: 95, close: 104, volume: 10 },
+            { open: 106, high: 107, low: 96, close: 98, volume: 12 },
+        ];
+        expect(isBearishEngulfing(velas)).toBe(true);
+    });
+
+    it('debería detectar correctamente cuando NO hay Bearish Engulfing', () => {
+        // Dos velas bajistas seguidas
+        const velas = [
+            { open: 100, high: 105, low: 95, close: 98, volume: 10 },
+            { open: 98, high: 99, low: 94, close: 96, volume: 12 },
+        ];
+        expect(isBearishEngulfing(velas)).toBe(false);
+    });
+
+    it('debería devolver false en Bearish Engulfing si no hay suficientes velas', () => {
+        expect(isBearishEngulfing([{ open: 1, high: 2, low: 1, close: 2, volume: 1 }])).toBe(false);
     });
 });

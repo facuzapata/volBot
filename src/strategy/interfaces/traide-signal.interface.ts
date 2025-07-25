@@ -7,4 +7,8 @@ export interface TradeSignal {
     takeProfit: number;
     side: 'buy' | 'sell';
     paperTrading: boolean;
+    timestamp?: number;
+    confidence?: number;
+    indicators?: any;
+    buySignalId?: string;
 }

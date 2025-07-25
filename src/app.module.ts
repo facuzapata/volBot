@@ -6,6 +6,7 @@ import { BinanceModule } from './binance/binance.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { StrategyModule } from './strategy/strategy.module';
 import { TradingModule } from './traiding/trading.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { TradingModule } from './traiding/trading.module';
     BinanceModule,
     StrategyModule,
     TradingModule,
+    NotificationsModule,
   ],
 })
 export class AppModule { }

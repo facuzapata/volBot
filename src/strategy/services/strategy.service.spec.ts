@@ -1,17 +1,26 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { StrategyService } from './strategy.service';
+import { SignalDatabaseService } from './signal-database.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 // Mock de los helpers (ruta correcta)
 jest.mock('../../utils/indicators', () => ({
   calculateSMA: jest.fn(),
+  calculateEMA: jest.fn(),
   calculateRSI: jest.fn(),
   calculateMACD: jest.fn(() => ({
     macdLine: [1, 2, 3],
     signalLine: [1, 2, 2],
+    histogram: [0, 0, 1],
   })),
   calculateATR: jest.fn(() => 200),
+  calculateBollingerBands: jest.fn(() => ({
+    upper: 107000,
+    middle: 106000,
+    lower: 105000,
+  })),
   isBullishEngulfing: jest.fn(),
+  isBearishEngulfing: jest.fn(),
 }));
 
 beforeAll(() => {
@@ -22,6 +31,26 @@ class MockEventEmitter2 {
   emit = jest.fn();
   on = jest.fn();
   off = jest.fn();
+}
+
+class MockSignalDatabaseService {
+  createSignal = jest.fn().mockResolvedValue({
+    id: 'test-signal-id',
+    symbol: 'BTCUSDT',
+    initialPrice: 106000,
+    status: 'active',
+    movements: []
+  });
+
+  createMovement = jest.fn().mockResolvedValue({
+    id: 'test-movement-id',
+    type: 'buy',
+    price: 106000,
+    quantity: 0.001
+  });
+
+  getActiveSignals = jest.fn().mockResolvedValue([]);
+  getSignalById = jest.fn().mockResolvedValue(null);
 }
 
 // 50 velas reales simuladas
@@ -81,17 +110,20 @@ const velasReales = [
 describe('StrategyService', () => {
   let service: StrategyService;
   let eventEmitter: MockEventEmitter2;
+  let signalDbService: MockSignalDatabaseService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StrategyService,
         { provide: EventEmitter2, useClass: MockEventEmitter2 },
+        { provide: SignalDatabaseService, useClass: MockSignalDatabaseService },
       ],
     }).compile();
 
     service = module.get<StrategyService>(StrategyService);
     eventEmitter = module.get<MockEventEmitter2>(EventEmitter2);
+    signalDbService = module.get<MockSignalDatabaseService>(SignalDatabaseService);
   });
 
   it('debería estar definido', () => {
@@ -101,254 +133,231 @@ describe('StrategyService', () => {
   it('debería inicializar y registrar en el log al iniciar el módulo', () => {
     const logSpy = jest.spyOn((service as any).logger, 'log');
     service.onModuleInit();
-    expect(logSpy).toHaveBeenCalledWith('Estrategia inicializada.');
+    expect(logSpy).toHaveBeenCalledWith('🚀 Estrategia de trading inicializada con control de riesgo avanzado');
   });
 
-  it('debería agregar una vela y mantener el máximo de velas', () => {
-    (service as any).candles = Array(50).fill({ close: 1 });
-    const candle = { close: 2, open: 1, volume: 1, high: 2, low: 1, time: Date.now() };
-    service.processCandle(candle as any);
-    expect((service as any).candles.length).toBe(50);
-    expect((service as any).candles[49].close).toBe(2);
+  it('debería agregar una vela y mantener el máximo de velas', async () => {
+    (service as any).candles = Array(100).fill({ close: 1 });
+    const candle = { close: 2, open: 1, volume: 1, high: 2, low: 1, timestamp: Date.now() };
+    await service.processCandle(candle as any);
+    expect((service as any).candles.length).toBe(100);
+    expect((service as any).candles[99].close).toBe(2);
   });
 
-  it('no debería procesar indicadores si no hay suficientes velas', () => {
+  it('no debería procesar indicadores si no hay suficientes velas', async () => {
     (service as any).candles = Array(10).fill({ close: 1 });
-    const candle = { close: 2, open: 1, volume: 1, high: 2, low: 1, time: Date.now() };
+    const candle = { close: 2, open: 1, volume: 1, high: 2, low: 1, timestamp: Date.now() };
     const debugSpy = jest.spyOn((service as any).logger, 'debug');
-    service.processCandle(candle as any);
-    expect(debugSpy).toHaveBeenCalled();
+    await service.processCandle(candle as any);
+    expect(debugSpy).toHaveBeenCalledWith('Esperando más datos para análisis técnico completo');
   });
 
   // Test de compra realista
-  it('debería procesar la lógica de señal de compra con velas reales', () => {
+  it('debería procesar la lógica de señal de compra con velas reales', async () => {
     const indicators = require('../../utils/indicators');
-    indicators.calculateSMA.mockImplementation((data, period) => period === 5 ? 105900 : 105000); // smaShort > smaLong
+    indicators.calculateSMA.mockImplementation((data, period) => {
+      if (period === 9) return 105900; // smaShort
+      if (period === 21) return 105000; // smaLong
+      if (period === 50) return 104500; // smaVeryLong
+      if (period === 10) return 100; // volumeMA
+      return null;
+    });
+    indicators.calculateEMA.mockImplementation((data, period) => {
+      if (period === 12) return 105800; // emaShort
+      if (period === 26) return 105200; // emaLong
+      return null;
+    });
     indicators.calculateMACD.mockReturnValue({
       macdLine: [1, 2, 3],
       signalLine: [1, 2, 2],
-    }); // MACD > Signal
+      histogram: [0, 0, 1],
+    });
+    indicators.calculateBollingerBands.mockReturnValue({
+      upper: 107000,
+      middle: 106000,
+      lower: 105000,
+    });
     indicators.isBullishEngulfing.mockReturnValue(true);
+    indicators.isBearishEngulfing.mockReturnValue(false);
     indicators.calculateRSI.mockReturnValue(55);
+    indicators.calculateATR.mockReturnValue(200);
 
-    (service as any).candles = [...velasReales];
-    (service as any).lastCandle = { close: 105800, open: 105700, volume: 40, high: 105900, low: 105600, time: 10 };
-    jest.spyOn(service as any, 'preValidateSignal').mockReturnValue(true);
-    const emitSpy = jest.spyOn(service as any, 'emitTradeSignal').mockImplementation(() => { });
+    // Configurar 30+ velas para que pase la validación inicial
+    (service as any).candles = Array(35).fill(0).map((_, i) => ({
+      open: 105000 + i * 10,
+      high: 105100 + i * 10,
+      low: 104900 + i * 10,
+      close: 105000 + i * 10,
+      volume: 100 + i,
+      timestamp: Date.now() + i * 1000
+    }));
 
-    // priceRatio <= 0.999, volumeRatio > 1.1, candle.close > candle.open
-    const candle = { open: 105600, high: 105900, low: 105600, close: 105694, volume: 50, time: 11 };
-    service.processCandle(candle as any);
-    expect(emitSpy).toHaveBeenCalledWith('buy', 105694, 200);
+    const createSignalSpy = jest.spyOn(signalDbService, 'createSignal');
+    const createMovementSpy = jest.spyOn(signalDbService, 'createMovement');
+
+    const candle = {
+      open: 105600,
+      high: 105900,
+      low: 105600,
+      close: 105700,
+      volume: 150,
+      timestamp: Date.now()
+    };
+
+    await service.processCandle(candle as any);
+
+    // Verificar que se creó la señal y el movimiento
+    expect(createSignalSpy).toHaveBeenCalled();
+    expect(createMovementSpy).toHaveBeenCalled();
   });
 
   // Test de venta realista
-  it('debería procesar la lógica de señal de venta con velas reales', () => {
+  it('debería procesar la lógica de señal de venta con señal de compra existente', async () => {
     const indicators = require('../../utils/indicators');
-    indicators.calculateSMA.mockImplementation((data, period) => period === 5 ? 104900 : 105000);
+    indicators.calculateSMA.mockImplementation((data, period) => {
+      if (period === 9) return 104900; // smaShort
+      if (period === 21) return 105000; // smaLong  
+      if (period === 50) return 105500; // smaVeryLong
+      if (period === 10) return 100; // volumeMA
+      return null;
+    });
+    indicators.calculateEMA.mockImplementation((data, period) => {
+      if (period === 12) return 104800; // emaShort
+      if (period === 26) return 105200; // emaLong
+      return null;
+    });
     indicators.calculateMACD.mockReturnValue({
       macdLine: [1, 2, 0],
       signalLine: [1, 2, 2],
+      histogram: [0, 0, -2],
+    });
+    indicators.calculateBollingerBands.mockReturnValue({
+      upper: 107000,
+      middle: 106000,
+      lower: 105000,
     });
     indicators.isBullishEngulfing.mockReturnValue(false);
-    indicators.calculateRSI.mockReturnValue(45);
-    indicators.calculateATR.mockReturnValue(1); // ATR bajo para asegurar size válido
+    indicators.isBearishEngulfing.mockReturnValue(true);
+    indicators.calculateRSI.mockReturnValue(70);
+    indicators.calculateATR.mockReturnValue(200);
 
-    // Asegúrate de que las últimas 5 velas NO tengan close igual a la señal activa
-    (service as any).candles = [
-      ...velasReales.slice(0, velasReales.length - 5),
-      { open: 110000, high: 110100, low: 109900, close: 110000, volume: 10, time: 51 },
-      { open: 110100, high: 110200, low: 110000, close: 110100, volume: 12, time: 52 },
-      { open: 110200, high: 110300, low: 110100, close: 110200, volume: 15, time: 53 },
-      { open: 110300, high: 110400, low: 110200, close: 110300, volume: 18, time: 54 },
-      { open: 110400, high: 110500, low: 110300, close: 110400, volume: 20, time: 55 },
-    ];
-    (service as any).lastCandle = { close: 110400, open: 110300, volume: 20, high: 110500, low: 110300, time: 55 };
-    jest.spyOn(service as any, 'preValidateSignal').mockReturnValue(true);
-    const emitSpy = jest.spyOn(service as any, 'emitTradeSignal').mockImplementation(() => { });
+    // Configurar 30+ velas para que pase la validación inicial
+    (service as any).candles = Array(35).fill(0).map((_, i) => ({
+      open: 105000 + i * 10,
+      high: 105100 + i * 10,
+      low: 104900 + i * 10,
+      close: 105000 + i * 10,
+      volume: 100 + i,
+      timestamp: Date.now() + i * 1000
+    }));
 
-    (service as any).activeSignals = [{
-      symbol: 'BTCUSDT',
-      price: 105694,
-      size: 1,
-      stopLoss: 100000,
-      takeProfit: 150000,
-      side: 'buy',
-      paperTrading: true,
-    }];
+    // Simular señal de compra existente
+    const mockBuySignal = {
+      id: 'test-buy-signal',
+      initialPrice: 105000, // Precio de compra
+      movements: [{
+        id: 'test-buy-movement',
+        type: 'buy',
+        price: 105000,
+        quantity: 0.001,
+        commission: 0.105,
+        totalAmount: 105
+      }]
+    };
 
-    const COMMISSION = 0.001;
-    const PROFIT_MARGIN = 0.002;
-    const lastBuy = 105694;
-    const minSellPrice = lastBuy * (1 + 2 * COMMISSION + PROFIT_MARGIN);
+    signalDbService.getActiveSignals.mockResolvedValue([mockBuySignal]);
+    signalDbService.getSignalById.mockResolvedValue(mockBuySignal);
 
-    // Vela de venta con volumen mayor y close < open
-    const candle = { open: 150100, high: 150200, low: 149900, close: 150000, volume: 55, time: 56 };
-    service.processCandle(candle as any);
+    const createMovementSpy = jest.spyOn(signalDbService, 'createMovement');
 
-    const call = emitSpy.mock.calls.find(([side]) => side === 'sell');
-    expect(call).toBeDefined();
-    if (call) {
-      expect(call[1]).toBeGreaterThanOrEqual(minSellPrice);
-      expect(call[2]).toBeGreaterThan(0);
-    }
+    // Vela de venta con precio que garantiza ganancia
+    const sellPrice = 107000; // Precio alto que garantiza ganancia
+    const candle = {
+      open: 106900,
+      high: 107100,
+      low: 106800,
+      close: sellPrice,
+      volume: 150,
+      timestamp: Date.now()
+    };
+
+    await service.processCandle(candle as any);
+
+    // Verificar que se creó el movimiento de venta
+    expect(createMovementSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signalId: 'test-buy-signal',
+        type: 'sell',
+        price: sellPrice
+      })
+    );
   });
 
-  it('debería actualizar lastCandle después de procesar', () => {
+  it('debería actualizar lastCandle después de procesar', async () => {
     const indicators = require('../../utils/indicators');
     indicators.calculateSMA.mockReturnValue(105000);
+    indicators.calculateEMA.mockReturnValue(105000);
     indicators.calculateMACD.mockReturnValue({
       macdLine: [1, 2, 3],
       signalLine: [1, 2, 2.5],
+      histogram: [0, 0, 0.5],
     });
     indicators.calculateRSI.mockReturnValue(55);
     indicators.calculateATR.mockReturnValue(200);
+    indicators.calculateBollingerBands.mockReturnValue({
+      upper: 107000,
+      middle: 106000,
+      lower: 105000,
+    });
     indicators.isBullishEngulfing.mockReturnValue(true);
+    indicators.isBearishEngulfing.mockReturnValue(false);
 
-    (service as any).candles = [...velasReales];
-    (service as any).lastCandle = velasReales[velasReales.length - 1];
+    // Configurar 30+ velas para que pase la validación inicial
+    (service as any).candles = Array(35).fill(0).map((_, i) => ({
+      open: 105000 + i * 10,
+      high: 105100 + i * 10,
+      low: 104900 + i * 10,
+      close: 105000 + i * 10,
+      volume: 100 + i,
+      timestamp: Date.now() + i * 1000
+    }));
 
-    const candle = { open: 105800, high: 105900, low: 105700, close: 105850, volume: 60, time: 12 };
-    service.processCandle(candle as any);
+    const candle = { open: 105800, high: 105900, low: 105700, close: 105850, volume: 150, timestamp: Date.now() };
+    await service.processCandle(candle as any);
     expect((service as any).lastCandle).toEqual(candle);
   });
 
-  it('no debería emitir señal si preValidateSignal retorna false', () => {
-    (service as any).candles = [...velasReales];
-    (service as any).lastCandle = velasReales[velasReales.length - 1];
-    jest.spyOn(service as any, 'preValidateSignal').mockReturnValue(false);
-    const emitSpy = jest.spyOn(service as any, 'emitTradeSignal').mockImplementation(() => { });
-    const candle = { open: 105800, high: 105900, low: 105700, close: 105850, volume: 60, time: 12 };
-    service.processCandle(candle as any);
-    expect(emitSpy).not.toHaveBeenCalled();
+  it('debería resetear contadores diarios correctamente', () => {
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toDateString();
+
+    (service as any).lastResetDate = yesterday;
+    (service as any).dailySignalCount = 5;
+
+    (service as any).resetDailyCounters();
+
+    expect((service as any).dailySignalCount).toBe(0);
+    expect((service as any).lastResetDate).toBe(today);
   });
 
-  it('debería no emitir señal si hay valores nulos en los indicadores', () => {
-    const indicators = require('../../utils/indicators');
-    indicators.calculateSMA.mockReturnValueOnce(null);
-    (service as any).candles = [...velasReales];
-    (service as any).lastCandle = velasReales[velasReales.length - 1];
-    const emitSpy = jest.spyOn(service as any, 'emitTradeSignal').mockImplementation(() => { });
-    const candle = { open: 105800, high: 105900, low: 105700, close: 105850, volume: 60, time: 12 };
-    service.processCandle(candle as any);
-    expect(emitSpy).not.toHaveBeenCalled();
+  it('debería respetar el límite diario de señales', async () => {
+    (service as any).dailySignalCount = 10; // Límite alcanzado
+
+    // Configurar 30+ velas para que pase la validación inicial
+    (service as any).candles = Array(35).fill(0).map((_, i) => ({
+      open: 105000 + i * 10,
+      high: 105100 + i * 10,
+      low: 104900 + i * 10,
+      close: 105000 + i * 10,
+      volume: 100 + i,
+      timestamp: Date.now() + i * 1000
+    }));
+
+    const debugSpy = jest.spyOn((service as any).logger, 'debug');
+    const candle = { open: 105800, high: 105900, low: 105700, close: 105850, volume: 150, timestamp: Date.now() };
+
+    await service.processCandle(candle as any);
+
+    expect(debugSpy).toHaveBeenCalledWith('Límite diario de señales alcanzado');
   });
-
-  it('debería no emitir señal si el ratio de volumen no es suficiente', () => {
-    (service as any).candles = [...velasReales];
-    (service as any).lastCandle = velasReales[velasReales.length - 1];
-    jest.spyOn(service as any, 'preValidateSignal').mockReturnValue(true);
-    const emitSpy = jest.spyOn(service as any, 'emitTradeSignal').mockImplementation(() => { });
-    // volumen igual, ratio 1
-    const candle = { open: 105800, high: 105900, low: 105700, close: 105850, volume: 40, time: 12 };
-    service.processCandle(candle as any);
-    expect(emitSpy).not.toHaveBeenCalled();
-  });
-
-  describe('StrategyService - Cobertura de preValidateSignal y emitTradeSignal', () => {
-    let service: StrategyService;
-    let eventEmitter: MockEventEmitter2;
-
-    beforeEach(async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          StrategyService,
-          { provide: EventEmitter2, useClass: MockEventEmitter2 },
-        ],
-      }).compile();
-
-      service = module.get<StrategyService>(StrategyService);
-      eventEmitter = module.get<MockEventEmitter2>(EventEmitter2);
-      jest.spyOn(console, 'log').mockImplementation(() => { });
-      jest.spyOn(console, 'debug').mockImplementation(() => { });
-    });
-
-    it('debería retornar false si hay menos de 10 velas', () => {
-      (service as any).candles = Array(5).fill({ close: 1 });
-      expect((service as any).preValidateSignal('buy', 100, 10)).toBe(false);
-    });
-
-    it('debería retornar false si hay cooldown de señales', () => {
-      // Las últimas 5 velas tienen close=1, igual que el precio de la señal activa
-      (service as any).candles = [
-        ...Array(10).fill({ close: 2 }),
-        ...Array(5).fill({ close: 1 }),
-      ];
-      (service as any).activeSignals = [{ price: 1 }];
-      expect((service as any).preValidateSignal('buy', 100, 10)).toBe(false);
-    });
-
-    it('debería retornar false si hay caída brusca en drawdown', () => {
-      (service as any).candles = [
-        ...Array(9).fill({ close: 100 }),
-        { close: 200 }, // caída de 100
-        { close: 50 }
-      ];
-      (service as any).activeSignals = [];
-      expect((service as any).preValidateSignal('buy', 100, 20)).toBe(false); // 200-50 > 2*20
-    });
-
-    it('debería retornar false si RSI es null', () => {
-      (service as any).candles = Array(15).fill({ close: 1 });
-      jest.spyOn(require('../../utils/indicators'), 'calculateRSI').mockReturnValueOnce(null);
-      expect((service as any).preValidateSignal('buy', 100, 10)).toBe(false);
-    });
-
-    it('debería retornar false si RSI fuera de rango para buy', () => {
-      (service as any).candles = Array(15).fill({ close: 1 });
-      jest.spyOn(require('../../utils/indicators'), 'calculateRSI').mockReturnValueOnce(39);
-      expect((service as any).preValidateSignal('buy', 100, 10)).toBe(false);
-    });
-
-    it('debería retornar false si RSI fuera de rango para sell', () => {
-      (service as any).candles = Array(15).fill({ close: 1 });
-      jest.spyOn(require('../../utils/indicators'), 'calculateRSI').mockReturnValueOnce(61);
-      expect((service as any).preValidateSignal('sell', 100, 10)).toBe(false);
-    });
-
-    it('debería retornar false si el tamaño de posición es excesivo', () => {
-      (service as any).candles = Array(15).fill({ close: 100 });
-      jest.spyOn(require('../../utils/indicators'), 'calculateRSI').mockReturnValue(50);
-      // price y atr hacen que el tamaño de posición sea > 20
-      expect((service as any).preValidateSignal('buy', 0.5, 0.00001)).toBe(false);
-    });
-
-    it('debería retornar true si pasa todas las validaciones', () => {
-      (service as any).candles = Array(15).fill({ close: 100 });
-      jest.spyOn(require('../../utils/indicators'), 'calculateRSI').mockReturnValue(50);
-      (service as any).activeSignals = [];
-      expect((service as any).preValidateSignal('buy', 100, 10)).toBe(true);
-    });
-
-    it('emitTradeSignal no emite si hay demasiadas señales activas', () => {
-      (service as any).activeSignals = [{}, {}];
-      const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => { });
-      (service as any).emitTradeSignal('buy', 100, 10);
-      expect(warnSpy).toHaveBeenCalled();
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('emitTradeSignal emite correctamente una señal', () => {
-      (service as any).activeSignals = [];
-      const emitSpy = jest.spyOn(eventEmitter, 'emit');
-      (service as any).emitTradeSignal('buy', 100, 10);
-      expect(emitSpy).toHaveBeenCalledWith('trade.buy', expect.objectContaining({
-        price: 100,
-        side: 'buy',
-        paperTrading: true,
-      }));
-      expect((service as any).activeSignals.length).toBe(1);
-    });
-  });
-  it('debería cerrar (eliminar) la señal activa por id', () => {
-    (service as any).activeSignals = [
-      { id: 'btc-id', symbol: 'BTCUSDT', price: 100, size: 1, stopLoss: 90, takeProfit: 110, side: 'buy', paperTrading: true },
-      { id: 'eth-id', symbol: 'ETHUSDT', price: 200, size: 1, stopLoss: 180, takeProfit: 220, side: 'sell', paperTrading: true },
-    ];
-    (service as any).closeSignal('btc-id');
-    expect((service as any).activeSignals).toEqual([
-      { id: 'eth-id', symbol: 'ETHUSDT', price: 200, size: 1, stopLoss: 180, takeProfit: 220, side: 'sell', paperTrading: true },
-    ]);
-  });
-
 });
