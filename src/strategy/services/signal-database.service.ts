@@ -272,17 +272,31 @@ export class SignalDatabaseService {
             const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
             const duration = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 
-            // Calcular precios promedio
-            const avgBuyPrice = buyMovements.reduce((sum, m) => sum + m.price, 0) / buyMovements.length;
+            // Calcular precios promedio - Los decimales de PostgreSQL vienen como strings
+            const avgBuyPrice = buyMovements.reduce((sum, m) => sum + Number(m.price), 0) / buyMovements.length;
+
+            // Debug detallado de cantidades - Los decimales de PostgreSQL vienen como strings
+            this.logger.debug(`🔍 Debug cantidades de movimientos de compra:`);
+            buyMovements.forEach((m, index) => {
+                this.logger.debug(`  📊 Compra ${index + 1}: quantity=${m.quantity} (tipo: ${typeof m.quantity}, convertido: ${Number(m.quantity)})`);
+            });
+
             let totalQuantity = buyMovements.reduce((sum, m) => {
-                const quantity = typeof m.quantity === 'number' && isFinite(m.quantity) ? m.quantity : 0;
+                const quantity = Number(m.quantity); // Convertir string decimal a number
+                if (!isFinite(quantity) || isNaN(quantity)) {
+                    this.logger.warn(`⚠️ Cantidad inválida en movimiento: ${m.quantity} -> usando 0`);
+                    return sum;
+                }
+                this.logger.debug(`  ➕ Sumando cantidad: ${quantity}, suma actual: ${sum + quantity}`);
                 return sum + quantity;
             }, 0);
+
+            this.logger.debug(`📊 Total quantity calculado: ${totalQuantity}`);
 
             // Validar que totalQuantity sea un número válido
             if (!isFinite(totalQuantity) || isNaN(totalQuantity) || totalQuantity <= 0) {
                 this.logger.error(`❌ totalQuantity inválido: ${totalQuantity}, usando cantidad del primer movimiento de compra`);
-                const fallbackQuantity = buyMovements[0]?.quantity || 0;
+                const fallbackQuantity = Number(buyMovements[0]?.quantity) || 0;
                 totalQuantity = typeof fallbackQuantity === 'number' && isFinite(fallbackQuantity) ? fallbackQuantity : 0.0001;
                 this.logger.error(`📊 Fallback quantity usado: ${totalQuantity}`);
             }

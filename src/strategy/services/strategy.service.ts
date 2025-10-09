@@ -24,7 +24,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
 
     // Limitaciones para control de riesgo
     private readonly maxActiveSignals = 2; // REDUCIDO para menos exposición
-    private readonly maxDailySignals = 6; // REDUCIDO para controlar volumen diario
+    private readonly maxDailySignals = 300; // REDUCIDO para controlar volumen diario
     private dailySignalCount = 0;
     private lastResetDate = new Date().toDateString();
     // Nota: Las señales activas se obtienen de la base de datos, no se mantienen en memoria
@@ -785,9 +785,6 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         if (strategy === 'immediate') {
             this.logger.log(`⚡ ACTIVANDO VENTA INMEDIATA para señal ${signal.id}`);
 
-            // Calcular precio de venta inmediata con margen mínimo
-            const quickSellPrice = candle.close * (1 + this.QUICK_SELL_MARGIN);
-
             // Programar venta inmediata después de la compra (dar tiempo para que se ejecute)
             setTimeout(async () => {
                 try {
@@ -796,11 +793,17 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
                     if (updatedSignal) {
                         const buyMovement = updatedSignal.movements.find(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
                         if (buyMovement) {
-                            this.logger.log(`⚡ EJECUTANDO VENTA INMEDIATA a precio ${quickSellPrice.toFixed(2)} (margen: ${(this.QUICK_SELL_MARGIN * 100).toFixed(1)}%)`);
+                            // ⚠️ CAMBIO CRÍTICO: NO usar precio calculado, usar precio REAL de mercado
+                            // Obtener el precio real actual desde las velas más recientes
+                            const currentCandles = await this.candleCacheService.getCandles();
+                            const latestCandle = currentCandles[currentCandles.length - 1];
+                            const realMarketPrice = latestCandle.close;
 
-                            // Crear venta inmediata
+                            this.logger.log(`⚡ EJECUTANDO VENTA INMEDIATA: Precio real de mercado=${realMarketPrice} vs precio de compra=${Number(buyMovement.price)}`);
+
+                            // Crear venta inmediata con PRECIO REAL de mercado
                             await this.createQuickSellSignal(
-                                { ...candle, close: quickSellPrice },
+                                { ...latestCandle, close: realMarketPrice },
                                 atr, smaShort, smaLong, rsi, macd, volume, signal.id
                             );
                         } else {
@@ -928,19 +931,36 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
             return;
         }
 
-        const profit = (candle.close - buyMovement.price) / buyMovement.price;
-        const totalAmount = candle.close * buyMovement.quantity;
+        // Convertir valores de PostgreSQL (decimales como strings) a números
+        const buyPrice = Number(buyMovement.price);
+        const buyQuantity = Number(buyMovement.quantity);
+        const buyCommission = Number(buyMovement.commission);
+
+        // Validar conversiones
+        if (!isFinite(buyPrice) || !isFinite(buyQuantity) || !isFinite(buyCommission)) {
+            this.logger.error(`❌ Valores inválidos después de conversión: buyPrice=${buyPrice}, buyQuantity=${buyQuantity}, buyCommission=${buyCommission}`);
+            return;
+        }
+
+        // VALIDACIÓN CRÍTICA: Verificar que el precio de venta sea MAYOR que el precio de compra
+        if (candle.close <= buyPrice) {
+            this.logger.warn(`⚠️ VENTA CANCELADA: Precio de venta ${candle.close} <= precio de compra ${buyPrice} - EVITANDO PÉRDIDA`);
+            return;
+        }
+
+        const profit = (candle.close - buyPrice) / buyPrice;
+        const totalAmount = candle.close * buyQuantity;
         const commission = totalAmount * this.COMMISSION;
         const netAmount = totalAmount - commission;
-        const grossProfit = totalAmount - (buyMovement.price * buyMovement.quantity);
-        const netProfit = grossProfit - commission - buyMovement.commission;
+        const grossProfit = totalAmount - (buyPrice * buyQuantity);
+        const netProfit = grossProfit - commission - buyCommission;
 
         // Validar que todos los valores sean números válidos
-        const values = { profit, totalAmount, commission, netAmount, grossProfit, netProfit };
+        const values = { profit, totalAmount, commission, netAmount, grossProfit, netProfit, buyPrice, buyQuantity, buyCommission };
         for (const [key, value] of Object.entries(values)) {
             if (!isFinite(value) || isNaN(value)) {
                 this.logger.error(`❌ Valor inválido en ${key}: ${value}`);
-                this.logger.error(`📊 Datos: candle.close=${candle.close}, buyMovement.price=${buyMovement.price}, buyMovement.quantity=${buyMovement.quantity}, buyMovement.commission=${buyMovement.commission}`);
+                this.logger.error(`📊 Datos: candle.close=${candle.close}, buyPrice=${buyPrice}, buyQuantity=${buyQuantity}, buyCommission=${buyCommission}`);
                 return;
             }
         }
@@ -950,7 +970,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
             signalId: buySignalId,
             type: MovementType.SELL,
             price: candle.close,
-            quantity: buyMovement.quantity,
+            quantity: buyQuantity, // Usar la cantidad convertida
             totalAmount,
             commission,
             netAmount
@@ -977,7 +997,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
                 symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
                 side: 'SELL',
                 type: 'MARKET',
-                quantity: buyMovement.quantity
+                quantity: buyQuantity // Usar la cantidad convertida
             });
         }
 
@@ -1016,23 +1036,51 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
             return;
         }
 
-        const profit = (candle.close - buyMovement.price) / buyMovement.price;
-        const totalAmount = candle.close * buyMovement.quantity;
-        const commission = totalAmount * this.COMMISSION;
-        const netAmount = totalAmount - commission;
-        const grossProfit = totalAmount - (buyMovement.price * buyMovement.quantity);
-        const netProfit = grossProfit - commission - buyMovement.commission;
+        // Convertir valores de PostgreSQL (decimales como strings) a números
+        const buyPrice = Number(buyMovement.price);
+        const buyQuantity = Number(buyMovement.quantity);
+        const buyCommission = Number(buyMovement.commission);
 
-        this.logger.log(`⚡ VENTA RÁPIDA: Profit=${(profit * 100).toFixed(3)}%, Net PnL=$${netProfit.toFixed(2)} USD`);
-
-        // Validar que sea rentable (al menos cubra comisiones + margen mínimo)
-        if (profit < this.QUICK_SELL_MARGIN) {
-            this.logger.warn(`⚠️ VENTA RÁPIDA CANCELADA: Profit insuficiente ${(profit * 100).toFixed(3)}% < ${(this.QUICK_SELL_MARGIN * 100).toFixed(1)}%`);
+        // Validar conversiones
+        if (!isFinite(buyPrice) || !isFinite(buyQuantity) || !isFinite(buyCommission)) {
+            this.logger.error(`❌ Valores inválidos después de conversión: buyPrice=${buyPrice}, buyQuantity=${buyQuantity}, buyCommission=${buyCommission}`);
+            this.logger.error(`📊 Valores originales: price=${buyMovement.price}, quantity=${buyMovement.quantity}, commission=${buyMovement.commission}`);
             return;
         }
 
+        // VALIDACIÓN CRÍTICA: Verificar que el precio de venta sea MAYOR que el precio de compra
+        if (candle.close <= buyPrice) {
+            this.logger.warn(`⚠️ VENTA RÁPIDA CANCELADA: Precio de venta ${candle.close} <= precio de compra ${buyPrice} - EVITANDO PÉRDIDA`);
+            return;
+        }
+
+        // Calcular ganancia REAL con validación estricta
+        const profit = (candle.close - buyPrice) / buyPrice;
+        const profitPercent = profit * 100;
+
+        // SEGUNDA VALIDACIÓN: Verificar ganancia mínima REAL con margen de seguridad
+        const requiredMinProfit = this.QUICK_SELL_MARGIN * 100; // 0.4%
+        const safetyMargin = 0.1; // 0.1% margen de seguridad adicional para fluctuaciones
+        const totalRequiredProfit = requiredMinProfit + safetyMargin; // 0.5% total
+
+        if (profitPercent < totalRequiredProfit) {
+            this.logger.warn(`⚠️ VENTA RÁPIDA CANCELADA: Ganancia real ${profitPercent.toFixed(3)}% < mínimo requerido ${totalRequiredProfit.toFixed(1)}% (incluye margen de seguridad)`);
+            return;
+        }
+
+        const totalAmount = candle.close * buyQuantity;
+        const commission = totalAmount * this.COMMISSION;
+        const netAmount = totalAmount - commission;
+        const grossProfit = totalAmount - (buyPrice * buyQuantity);
+        const netProfit = grossProfit - commission - buyCommission;
+
+        this.logger.log(`⚡ VENTA RÁPIDA: Precio compra=${buyPrice}, Precio venta=${candle.close}, Profit=${profitPercent.toFixed(3)}%, Net PnL=$${netProfit.toFixed(2)} USD`);
+
+        // ✅ VALIDACIONES CRÍTICAS COMPLETADAS - GARANTIZANDO GANANCIA REAL CON MARGEN DE SEGURIDAD
+        this.logger.log(`✅ CONFIRMANDO VENTA RÁPIDA: Ganancia verificada ${profitPercent.toFixed(3)}% > ${totalRequiredProfit.toFixed(1)}% (con margen de seguridad)`);
+
         // Validar que todos los valores sean números válidos
-        const values = { profit, totalAmount, commission, netAmount, grossProfit, netProfit };
+        const values = { profit, profitPercent, totalRequiredProfit, totalAmount, commission, netAmount, grossProfit, netProfit, buyPrice, buyQuantity, buyCommission };
         for (const [key, value] of Object.entries(values)) {
             if (!isFinite(value) || isNaN(value)) {
                 this.logger.error(`❌ Valor inválido en venta rápida ${key}: ${value}`);
@@ -1045,7 +1093,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
             signalId: buySignalId,
             type: MovementType.SELL,
             price: candle.close,
-            quantity: buyMovement.quantity,
+            quantity: buyQuantity, // Usar la cantidad convertida
             totalAmount,
             commission,
             netAmount
@@ -1063,9 +1111,9 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
                 symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
                 side: 'SELL',
                 type: 'MARKET',
-                quantity: buyMovement.quantity
+                quantity: buyQuantity // Usar la cantidad convertida
             });
-            this.logger.log(`⚡ VENTA RÁPIDA enviada a Binance: ${buyMovement.quantity} a ${candle.close}`);
+            this.logger.log(`⚡ VENTA RÁPIDA enviada a Binance: ${buyQuantity} a ${candle.close} (ganancia: ${profitPercent.toFixed(3)}%)`);
         }
 
         // Emitir evento
