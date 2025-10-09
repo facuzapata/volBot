@@ -11,7 +11,7 @@
     "start:dev": "nest start --watch",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint \"src/**/*.ts\" --fix",
-    "test": "jest",
+    "test": "jest --coverage",
     "prepare": "husky install"
   },
   "dependencies": {
@@ -21,11 +21,15 @@
     "@nestjs/event-emitter": "^3.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/typeorm": "^11.0.0",
+    "@types/redis": "^4.0.10",
     "binance-api-node": "^0.12.9",
     "pg": "^8.16.0",
+    "qrcode-terminal": "^0.12.0",
+    "redis": "^4.7.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.24"
+    "typeorm": "^0.3.24",
+    "whatsapp-web.js": "^1.31.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

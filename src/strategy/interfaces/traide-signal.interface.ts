@@ -1,4 +1,5 @@
 export interface TradeSignal {
+    id: string;
     symbol: string;
     price: number;
     size: number; // Tamaño de la posición
@@ -6,4 +7,8 @@ export interface TradeSignal {
     takeProfit: number;
     side: 'buy' | 'sell';
     paperTrading: boolean;
+    timestamp?: number;
+    confidence?: number;
+    indicators?: any;
+    buySignalId?: string;
 }
