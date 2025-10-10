@@ -1,7 +1,7 @@
-// src/binance/binance.service.ts
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Binance from 'binance-api-node';
+import { CreateOrderParams } from '../interfaces/create-order-params';
 
 export interface BinanceOrderResponse {
     symbol: string;
@@ -23,15 +23,6 @@ export interface BinanceOrderResponse {
         commission: string;
         commissionAsset: string;
     }>;
-}
-
-export interface CreateOrderParams {
-    symbol: string;
-    side: 'BUY' | 'SELL';
-    type: 'MARKET' | 'LIMIT';
-    quantity: number;
-    price?: number;
-    timeInForce?: 'GTC' | 'IOC' | 'FOK';
 }
 
 @Injectable()
@@ -234,6 +225,91 @@ export class BinanceService implements OnModuleInit, OnModuleDestroy {
 
         try {
             this.logger.log(`📝 Creando orden ${params.side} ${params.symbol}: ${params.quantity} @ ${params.price || 'MARKET'}`);
+
+            const response = await this.client.order(orderParams);
+
+            this.logger.log(`✅ Orden creada exitosamente: ${response.orderId} - Status: ${response.status}`);
+            return response;
+
+        } catch (error) {
+            // Si es error de timestamp, intentar re-sincronizar y reintentar
+            if (error.code === -1021) {
+                this.logger.warn('⚠️ Error de timestamp detectado en createOrder, re-sincronizando...');
+                try {
+                    await this.syncServerTime();
+                    // Reintentar después de sincronizar
+                    const response = await this.client.order(orderParams);
+                    this.logger.log(`✅ Orden creada exitosamente después de re-sincronizar: ${response.orderId} - Status: ${response.status}`);
+                    return response;
+                } catch (retryError) {
+                    this.logger.error(`❌ Error creando orden después de re-sincronizar:`, retryError);
+                    throw retryError;
+                }
+            }
+
+            this.logger.error(`❌ Error creando orden ${params.side} ${params.symbol}:`, error);
+
+            // Información adicional para errores específicos
+            if (error.code === -2010) {
+                this.logger.error(`💰 Error -2010 (NEW_ORDER_REJECTED) - Verificar:`);
+                this.logger.error(`   🔸 Balance disponible para ${params.side === 'BUY' ? 'USDT' : params.symbol.replace('USDT', '')}`);
+                this.logger.error(`   🔸 Cantidad: ${formattedQuantity} (original: ${params.quantity})`);
+                this.logger.error(`   🔸 Precio: ${params.price || 'MARKET'}`);
+                this.logger.error(`   🔸 URL: ${error.url || 'No disponible'}`);
+
+                // Intentar obtener balance actual
+                try {
+                    const usdtBalance = await this.getBalance('USDT');
+                    const btcBalance = await this.getBalance('BTC');
+                    this.logger.error(`   💰 Balance actual: USDT=${usdtBalance.toFixed(2)}, BTC=${btcBalance.toFixed(8)}`);
+                } catch (balanceError) {
+                    this.logger.error(`   ❌ No se pudo obtener balance:`, balanceError);
+                }
+            }
+
+            throw error;
+        }
+    }
+    async newCreateOrder(params: CreateOrderParams): Promise<BinanceOrderResponse> {
+        // Formatear cantidad según restricciones de Binance
+        let formattedQuantity: string;
+        if (params.symbol === 'BTCUSDT') {
+            // Para BTCUSDT: minQty=0.00001, stepSize=0.00001
+            const roundedQuantity = Math.max(0.00001, Math.floor(params.quantity / 0.00001) * 0.00001);
+            formattedQuantity = roundedQuantity.toFixed(5);
+        } else {
+            formattedQuantity = params.quantity.toFixed(8);
+        }
+
+        // Descontar la comisión de Binance de la cantidad (comisión estándar 0.1%)
+        const comisionBinance = 0.001; // 0.1%
+
+        // Aplicar la comisión a la cantidad si es una orden de venta (SELL)
+        if (params.side === 'SELL') {
+            const cantidadConComision = Number(formattedQuantity) * (1 - comisionBinance);
+
+            // Para BTCUSDT: asegurar que la cantidad cumpla con las restricciones de LOT_SIZE
+            // Redondear a 5 decimales (stepSize=0.00001)
+            const roundedQuantity = Math.max(0.00001, Math.floor(cantidadConComision / 0.00001) * 0.00001);
+            formattedQuantity = roundedQuantity.toFixed(5);
+        }
+
+        // Preparar parámetros de la orden
+        const orderParams: any = {
+            symbol: params.symbol,
+            side: params.side,
+            type: params.type,
+            quantity: formattedQuantity,
+        };
+
+        if (params.type === 'LIMIT') {
+            orderParams.price = Number(params.price).toFixed(2);
+            orderParams.timeInForce = params.timeInForce || 'GTC';
+        }
+        console.log(orderParams)
+
+        try {
+            this.logger.log(`📝 Creando orden ${params.side} ${params.symbol}: ${params.quantity} @ ${params.price || 'MARKET'} || ${params.timeInForce || 'GTC'}`);
 
             const response = await this.client.order(orderParams);
 

@@ -16,6 +16,9 @@ export class Signal {
     @Column({ type: 'varchar', length: 20 })
     symbol: string;
 
+    @Column({ type: 'uuid', nullable: true }) // Nullable para compatibilidad con señales existentes
+    userId: string;
+
     @Column({ type: 'enum', enum: SignalStatus, default: SignalStatus.ACTIVE })
     status: SignalStatus;
 

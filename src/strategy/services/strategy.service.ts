@@ -23,7 +23,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
     private readonly PAPER_TRADING: boolean; // true = paper trading, false = trading real
 
     // Limitaciones para control de riesgo
-    private readonly maxActiveSignals = 2; // REDUCIDO para menos exposición
+    private readonly maxActiveSignals = 3; // REDUCIDO para menos exposición
     private readonly maxDailySignals = 300; // REDUCIDO para controlar volumen diario
     private dailySignalCount = 0;
     private lastResetDate = new Date().toDateString();
@@ -63,7 +63,6 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
 
         // Obtener información del cache
         const cacheInfo = await this.candleCacheService.getCacheInfo();
-        this.logger.debug(`📊 Procesando vela: ${candle.close} | Total velas en cache: ${cacheInfo.candleCount}`);
 
         // Necesitamos al menos 50 velas para análisis técnico sólido (SMA 50 + buffer para MACD)
         if (cacheInfo.candleCount < 50) {
@@ -78,20 +77,9 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         }
 
         const activeSignals = await this.signalDbService.getActiveSignals();
-        this.logger.debug(`📊 Señales obtenidas de getActiveSignals(): ${activeSignals.length}`);
-
-        // Log detallado de las señales activas
-        for (const signal of activeSignals) {
-            const buyFilled = signal.movements.filter(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED).length;
-            const sellFilled = signal.movements.filter(m => m.type === MovementType.SELL && m.status === MovementStatus.FILLED).length;
-            this.logger.debug(`  📊 Señal ${signal.id}: BUY_FILLED=${buyFilled}, SELL_FILLED=${sellFilled}, Status=${signal.status}`);
-        }
 
         // Verificar si podemos crear nuevas señales de compra
         const canCreateNewSignals = activeSignals.length < this.maxActiveSignals;
-        if (!canCreateNewSignals) {
-            this.logger.debug(`❌ Límite de señales activas alcanzado: ${activeSignals.length}/${this.maxActiveSignals} - Solo evaluaremos ventas`);
-        }
 
         // Obtener velas del cache de Redis
         const candles = await this.candleCacheService.getCandles();
@@ -103,13 +91,11 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
 
         this.logger.debug(`🔢 Arrays creados - closes: ${closes.length}, highs: ${highs.length}, lows: ${lows.length}, volumes: ${volumes.length}`);
 
-        // Verificar que los datos sean válidos
         const hasValidCloses = closes.every(c => typeof c === 'number' && !isNaN(c) && c > 0);
         const hasValidHighs = highs.every(h => typeof h === 'number' && !isNaN(h) && h > 0);
         const hasValidLows = lows.every(l => typeof l === 'number' && !isNaN(l) && l > 0);
         const hasValidVolumes = volumes.every(v => typeof v === 'number' && !isNaN(v) && v >= 0);
 
-        this.logger.debug(`✅ Validación de datos - closes: ${hasValidCloses}, highs: ${hasValidHighs}, lows: ${lows.length}, volumes: ${hasValidVolumes}`);
 
         if (!hasValidCloses || !hasValidHighs || !hasValidLows || !hasValidVolumes) {
             this.logger.error('❌ Datos de velas inválidos detectados');
@@ -201,8 +187,9 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         };
     }
 
+    // generador de señales de compra - Binance
     private async analyzeMarketConditions(
-        candle: indicators.Candle,
+        lastCandle: indicators.Candle,
         techIndicators: any,
         activeSignals: Signal[],
         candles: indicators.Candle[],
@@ -217,7 +204,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         const latestSignal = signalLine[signalLine.length - 1];
         const latestHistogram = histogram[histogram.length - 1];
 
-        this.logger.debug(`📈 Indicadores técnicos para precio ${candle.close}:`);
+        this.logger.debug(`📈 Indicadores técnicos para precio ${lastCandle.close}:`);
         this.logger.debug(`  📊 SMAs: Short=${smaShort.toFixed(2)}, Long=${smaLong.toFixed(2)}, VeryLong=${smaVeryLong.toFixed(2)}`);
         this.logger.debug(`  📊 EMAs: Short=${emaShort.toFixed(2)}, Long=${emaLong.toFixed(2)}`);
         this.logger.debug(`  📊 RSI: ${rsi.toFixed(1)}`);
@@ -236,8 +223,8 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         // Análisis de velas
         const bullishEngulfing = indicators.isBullishEngulfing(candles);
         const bearishEngulfing = indicators.isBearishEngulfing(candles);
-        const priceNearBBLower = candle.close <= bbands.lower * 1.005;
-        const priceNearBBUpper = candle.close >= bbands.upper * 0.995;
+        const priceNearBBLower = lastCandle.close <= bbands.lower * 1.005;
+        const priceNearBBUpper = lastCandle.close >= bbands.upper * 0.995;
 
         this.logger.debug(`📊 Patrones de velas: BullishEngulfing=${bullishEngulfing}, BearishEngulfing=${bearishEngulfing}`);
         this.logger.debug(`📊 Posición BB: NearLower=${priceNearBBLower}, NearUpper=${priceNearBBUpper}`);
@@ -251,7 +238,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
 
         // Buscar señales de compra (solo si podemos crear nuevas)
         if (canCreateNewSignals) {
-            await this.evaluateBuySignals(candle, {
+            await this.evaluateBuySignals(lastCandle, {
                 isStrongUptrend,
                 isRangeMarket,
                 rsi,
@@ -272,21 +259,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         }
 
         // Buscar señales de venta (SIEMPRE evaluar ventas)
-        await this.evaluateSellSignals(candle, {
-            isStrongDowntrend,
-            isRangeMarket,
-            rsi,
-            latestMACD,
-            latestSignal,
-            latestHistogram,
-            bearishEngulfing,
-            priceNearBBUpper,
-            volumeConfirmation,
-            atr,
-            smaShort,
-            smaLong,
-            currentVolume: currentVolume
-        }, activeSignals);
+        await this.evaluateSellSignals(lastCandle, atr, activeSignals);
     }
 
     private async evaluateBuySignals(candle: indicators.Candle, analysis: any, activeSignals: Signal[]) {
@@ -349,11 +322,9 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         }
     }
 
-    private async evaluateSellSignals(candle: indicators.Candle, analysis: any, activeSignals: Signal[]) {
-        const {
-            isStrongDowntrend, isRangeMarket, rsi, latestMACD, latestSignal, latestHistogram,
-            bearishEngulfing, priceNearBBUpper, volumeConfirmation, atr, smaShort, smaLong, currentVolume
-        } = analysis;
+
+    //Ejecuta la señal de venta
+    private async evaluateSellSignals(candle: indicators.Candle, atr, activeSignals: Signal[]) {
 
         // Verificar que tengamos señales de compra para vender (señales con compra ejecutada pero sin venta)
         const buySignals = activeSignals.filter(signal => {
@@ -361,6 +332,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
             const hasSell = signal.movements.some(m => m.type === MovementType.SELL && m.status === MovementStatus.FILLED);
             return hasBuy && !hasSell; // Tiene compra ejecutada pero no venta
         });
+
 
         if (buySignals.length === 0) {
             this.logger.debug(`🔍 No hay señales de compra activas para evaluar venta`);
@@ -371,72 +343,61 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
 
         // Para cada señal de compra, evaluar si es momento de vender
         for (const signal of buySignals) {
-            const buyPrice = signal.initialPrice;
+            // Verificar si tiene movimientos de venta pendientes
+            const hasPendingSell = signal.movements.some(m =>
+                m.type === MovementType.SELL && m.status === MovementStatus.PENDING
+            );
 
-            // 🧠 HÍBRIDO INTELIGENTE: Determinar estrategia según condiciones
-            const strategy = this.determineSellingStrategy(atr, candle.close, buyPrice, {
-                isStrongUptrend: isStrongDowntrend ? false : (isRangeMarket ? false : true),
-                isStrongDowntrend,
-                rsi,
-                latestHistogram
-            });
+            if (hasPendingSell) {
+                // Obtener la señal actualizada para tener los datos más recientes
+                const updatedSignal = await this.signalDbService.getSignalById(signal.id);
+                if (!updatedSignal) continue;
 
-            this.logger.debug(`📊 Señal ${signal.id}: Estrategia=${strategy}, Precio compra=${buyPrice}, Precio actual=${candle.close}`);
+                // Obtener el movimiento de venta pendiente
+                const pendingSellMovement = updatedSignal.movements.find(m =>
+                    m.type === MovementType.SELL && m.status === MovementStatus.PENDING
+                );
 
-            // Calcular precios mínimos según estrategia
-            let minSellPrice: number;
-            let strategyName: string;
+                if (pendingSellMovement && pendingSellMovement.binanceOrderId) {
+                    try {
+                        // Verificar el estado de la orden directamente en Binance
+                        const orderStatus = await this.binanceService.getOrderStatus(
+                            updatedSignal.symbol,
+                            parseInt(pendingSellMovement.binanceOrderId)
+                        );
 
-            switch (strategy) {
-                case 'immediate':
-                    // Venta rápida con margen mínimo
-                    minSellPrice = buyPrice * (1 + 2 * this.COMMISSION + this.QUICK_SELL_MARGIN);
-                    strategyName = 'VENTA RÁPIDA';
-                    break;
+                        if (orderStatus.status === 'FILLED') {
+                            await this.signalDbService.updateMovementStatus(
+                                pendingSellMovement.id,
+                                MovementStatus.FILLED,
+                                { binanceResponse: orderStatus }
+                            );
 
-                case 'hold_trend':
-                    // Mantener posición hasta ganancia mayor
-                    minSellPrice = buyPrice * (1 + 2 * this.COMMISSION + this.MIN_PROFIT_MARGIN * 1.5);
-                    strategyName = 'MANTENER TENDENCIA';
-                    break;
+                            // Actualizar la señal a MATCHED
+                            this.logger.log(`✅ Venta completada para señal ${signal.id}, actualizando a MATCHED`);
+                            await this.signalDbService.updateStatusSignal(signal.id, SignalStatus.MATCHED);
+                            continue; // No continuar con esta señal
+                        }
+                    } catch (error) {
+                        this.logger.error(`❌ Error al verificar estado de orden en Binance:`, error);
+                    }
+                }
 
-                case 'wait_for_profit':
-                default:
-                    // Estrategia normal
-                    minSellPrice = buyPrice * (1 + 2 * this.COMMISSION + this.MIN_PROFIT_MARGIN);
-                    strategyName = 'ESPERAR GANANCIA';
-                    break;
+                // Verificar si ya hay alguna venta completada (por si se actualizó por otro proceso)
+                const filledSell = updatedSignal.movements.find(m =>
+                    m.type === MovementType.SELL && m.status === MovementStatus.FILLED
+                );
+
+                if (filledSell) {
+                    // Si hay una venta completada, actualizar la señal a MATCHED
+                    this.logger.log(`✅ Venta completada para señal ${signal.id}, actualizando a MATCHED`);
+                    await this.signalDbService.updateStatusSignal(signal.id, SignalStatus.MATCHED);
+                    continue; // No continuar con esta señal
+                }
             }
 
-            this.logger.debug(`📊 ${strategyName}: Precio mín. venta=${minSellPrice.toFixed(2)} para señal ${signal.id}`);
-
-            // Solo vender si alcanzamos el precio objetivo según la estrategia
-            if (candle.close <= minSellPrice) {
-                this.logger.debug(`❌ ${strategyName}: Precio ${candle.close} no supera mínimo ${minSellPrice.toFixed(2)}`);
-                continue;
-            }
-
-            // ✅ LÓGICA SIMPLIFICADA DE VENTA: Si hay ganancia, VENDER
-            const profitPercent = ((candle.close - buyPrice) / buyPrice) * 100;
-            const positionSize = this.capitalPerTrade / buyPrice; // Cantidad de la posición
-            const grossProfit = (candle.close - buyPrice) * positionSize; // Ganancia bruta en USD
-            const buyCommission = (buyPrice * positionSize) * this.COMMISSION; // Comisión de compra
-            const sellCommission = (candle.close * positionSize) * this.COMMISSION; // Comisión de venta
-            const totalCommissions = buyCommission + sellCommission; // Comisiones totales
-            const netProfitUSD = grossProfit - totalCommissions; // Ganancia neta en USD
-
-            this.logger.log(`💰 ${strategyName} - GANANCIA DETECTADA: ${profitPercent.toFixed(3)}%`);
-            this.logger.log(`💲 Ganancia bruta: $${grossProfit.toFixed(2)} USD | Comisiones: $${totalCommissions.toFixed(4)} USD | Ganancia NETA: $${netProfitUSD.toFixed(2)} USD`);
-            this.logger.debug(`📊 Precio compra: ${buyPrice}, Precio actual: ${candle.close}, Tamaño posición: ${positionSize.toFixed(6)}`);
-            this.logger.debug(`📊 Estrategia aplicada: ${strategyName}, Precio mínimo requerido: ${minSellPrice.toFixed(2)}`);
-
-            // Validar que la venta sea segura (evitar errores técnicos)
-            if (await this.validateSignalSafety('sell', candle.close, atr)) {
-                this.logger.log(`✅ EJECUTANDO ${strategyName} - Ganancia neta asegurada: $${netProfitUSD.toFixed(2)} USD`);
-                await this.createSellSignal(candle, atr, smaShort, smaLong, rsi, latestMACD, currentVolume, signal.id);
-            } else {
-                this.logger.debug(`❌ ${strategyName} falló validación de seguridad técnica`);
-            }
+            // Si no hay ventas pendientes o ninguna está FILLED, continuar con la evaluación
+            await this.newSellSignal(candle, signal, atr);
         }
     }
 
@@ -681,8 +642,12 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         const takeProfit = candle.close * (1 + takeProfitPercent);
 
         // Asegurar que el take profit cubra comisiones y margen mínimo
+        // Consideramos comisión en compra y venta (2 * COMMISSION) más un margen mínimo de ganancia
         const minTakeProfit = candle.close * (1 + 2 * this.COMMISSION + this.MIN_PROFIT_MARGIN);
-        const finalTakeProfit = Math.max(takeProfit, minTakeProfit);
+
+        // Usamos un factor adicional de seguridad para compensar redondeos, fluctuaciones y pérdida por comisiones
+        const safetyFactor = 1.07; // 7% adicional para seguridad y garantizar ganancia
+        const finalTakeProfit = Math.max(takeProfit, minTakeProfit) * safetyFactor;
 
         const rawPositionSize = this.capitalPerTrade / candle.close;
 
@@ -823,6 +788,7 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         type: 'MARKET' | 'LIMIT';
         quantity: number;
         price?: number;
+        timeInForce?: 'FOK' | 'IOC' | 'GTC' | 'GTX';
     }): Promise<void> {
         try {
             this.logger.log(`🔄 Ejecutando orden en Binance: ${orderParams.side} ${orderParams.quantity} ${orderParams.symbol}`);
@@ -840,11 +806,45 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
                     binanceResponse: binanceResponse
                 }
             );
+        } catch (error) {
+            this.logger.error(`❌ Error ejecutando orden en Binance:`, error);
 
-            // Si la orden no se ejecutó inmediatamente, programar verificación
-            if (binanceResponse.status !== 'FILLED') {
-                this.scheduleOrderStatusCheck(movementId, binanceResponse.orderId, orderParams.symbol);
-            }
+            // Marcar movimiento con error
+            await this.signalDbService.updateMovementStatus(
+                movementId,
+                MovementStatus.PENDING,
+                {
+                    binanceError: error
+                }
+            );
+        }
+    }
+    private async newExecuteBinanceOrder(movementId: string, orderParams: {
+        symbol: string;
+        side: 'BUY' | 'SELL';
+        type: 'MARKET' | 'LIMIT';
+        quantity: number;
+        price?: number;
+        timeInForce?: 'FOK' | 'IOC' | 'GTC' | 'GTX';
+    }): Promise<void> {
+        try {
+            this.logger.log(`🔄 Ejecutando orden en Binance: ${orderParams.side} ${orderParams.quantity} ${orderParams.symbol}`);
+
+            // Crear orden en Binance
+            const binanceResponse = await this.binanceService.newCreateOrder(orderParams);
+            console.log(binanceResponse)
+            console.log('movementId ', movementId)
+
+            // Actualizar movimiento con datos de Binance
+            await this.signalDbService.updateMovementStatus(
+                movementId,
+                binanceResponse.status === 'FILLED' ? MovementStatus.FILLED : MovementStatus.PENDING,
+                {
+                    binanceOrderId: binanceResponse.orderId.toString(),
+                    binanceClientOrderId: binanceResponse.clientOrderId,
+                    binanceResponse: binanceResponse
+                }
+            );
 
         } catch (error) {
             this.logger.error(`❌ Error ejecutando orden en Binance:`, error);
@@ -860,74 +860,27 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         }
     }
 
-    private scheduleOrderStatusCheck(movementId: string, orderId: number, symbol: string): void {
-        // Verificar estado de la orden cada 5 segundos por un máximo de 2 minutos
-        let attempts = 0;
-        const maxAttempts = 24; // 2 minutos / 5 segundos = 24 intentos
-
-        const checkStatus = async () => {
-            try {
-                attempts++;
-                const orderStatus = await this.binanceService.getOrderStatus(symbol, orderId);
-
-                this.logger.debug(`📊 Verificando orden ${orderId}, intento ${attempts}/${maxAttempts}, status: ${orderStatus.status}`);
-
-                if (orderStatus.status === 'FILLED') {
-                    await this.signalDbService.updateMovementStatus(
-                        movementId,
-                        MovementStatus.FILLED,
-                        {
-                            binanceResponse: orderStatus
-                        }
-                    );
-                    this.logger.log(`✅ Orden ${orderId} ejecutada exitosamente`);
-                    return;
-                }
-
-                if (orderStatus.status === 'CANCELED' || orderStatus.status === 'REJECTED' || orderStatus.status === 'EXPIRED') {
-                    this.logger.warn(`⚠️ Orden ${orderId} terminó con status: ${orderStatus.status}`);
-                    return;
-                }
-
-                // Continuar verificando si no hemos alcanzado el máximo de intentos
-                if (attempts < maxAttempts) {
-                    setTimeout(checkStatus, 5000); // Verificar de nuevo en 5 segundos
-                } else {
-                    this.logger.warn(`⏰ Tiempo agotado verificando orden ${orderId} después de ${attempts} intentos`);
-                }
-
-            } catch (error) {
-                this.logger.error(`❌ Error verificando estado de orden ${orderId}:`, error);
-                if (attempts < maxAttempts) {
-                    setTimeout(checkStatus, 5000);
-                }
-            }
-        };
-
-        // Iniciar verificación después de 5 segundos
-        setTimeout(checkStatus, 5000);
-    }
-
-    private async createSellSignal(
+    private async newSellSignal(
         candle: indicators.Candle,
-        atr: number,
-        smaShort: number,
-        smaLong: number,
-        rsi: number,
-        macd: number,
-        volume: number,
-        buySignalId: string
+        signal: Signal,
+        atr: number
     ) {
         // Obtener la señal de compra original
-        const buySignal = await this.signalDbService.getSignalById(buySignalId);
+        const buySignal = await this.signalDbService.getSignalById(signal.id);
         if (!buySignal) {
-            this.logger.error(`No se encontró señal de compra con ID: ${buySignalId}`);
+            this.logger.error(`No se encontró señal de compra con ID: ${signal.id}`);
             return;
         }
 
-        const buyMovement = buySignal.movements.find(m => m.type === MovementType.BUY);
+        const buyMovement = buySignal.movements.find(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
         if (!buyMovement) {
-            this.logger.error(`No se encontró movimiento de compra en señal: ${buySignalId}`);
+            this.logger.error(`No se encontró movimiento de compra en señal: ${signal.id}`);
+            return;
+        }
+
+        // Verificar si ya existe una venta pendiente para esta señal
+        const sellPendingMovement = buySignal.movements.find(m => m.type === MovementType.SELL && m.status === MovementStatus.PENDING);
+        if (sellPendingMovement) {
             return;
         }
 
@@ -943,72 +896,84 @@ export class StrategyService implements OnModuleInit, StrategyCallback {
         }
 
         // VALIDACIÓN CRÍTICA: Verificar que el precio de venta sea MAYOR que el precio de compra
-        if (candle.close <= buyPrice) {
-            this.logger.warn(`⚠️ VENTA CANCELADA: Precio de venta ${candle.close} <= precio de compra ${buyPrice} - EVITANDO PÉRDIDA`);
-            return;
-        }
+        // if (candle.close <= buyPrice) {
+        //     this.logger.warn(`⚠️ VENTA CANCELADA: Precio de venta ${candle.close} <= precio de compra ${buyPrice} - EVITANDO PÉRDIDA`);
+        //     return;
+        // }
 
-        const profit = (candle.close - buyPrice) / buyPrice;
-        const totalAmount = candle.close * buyQuantity;
-        const commission = totalAmount * this.COMMISSION;
-        const netAmount = totalAmount - commission;
-        const grossProfit = totalAmount - (buyPrice * buyQuantity);
-        const netProfit = grossProfit - commission - buyCommission;
+        // const profit = (candle.close - buyPrice) / buyPrice;
+        // const totalAmount = candle.close * buyQuantity;
+        // const commission = totalAmount * this.COMMISSION;
+        // const netAmount = totalAmount - commission;
+        // const grossProfit = totalAmount - (buyPrice * buyQuantity);
+        // const netProfit = grossProfit - commission - buyCommission;
 
-        // Validar que todos los valores sean números válidos
-        const values = { profit, totalAmount, commission, netAmount, grossProfit, netProfit, buyPrice, buyQuantity, buyCommission };
-        for (const [key, value] of Object.entries(values)) {
-            if (!isFinite(value) || isNaN(value)) {
-                this.logger.error(`❌ Valor inválido en ${key}: ${value}`);
-                this.logger.error(`📊 Datos: candle.close=${candle.close}, buyPrice=${buyPrice}, buyQuantity=${buyQuantity}, buyCommission=${buyCommission}`);
-                return;
-            }
-        }
+        // // Validar que todos los valores sean números válidos
+        // const values = { profit, totalAmount, commission, netAmount, grossProfit, netProfit, buyPrice, buyQuantity, buyCommission };
+        // for (const [key, value] of Object.entries(values)) {
+        //     if (!isFinite(value) || isNaN(value)) {
+        //         this.logger.error(`❌ Valor inválido en ${key}: ${value}`);
+        //         this.logger.error(`📊 Datos: candle.close=${candle.close}, buyPrice=${buyPrice}, buyQuantity=${buyQuantity}, buyCommission=${buyCommission}`);
+        //         return;
+        //     }
+        // }
 
         // Crear movimiento de venta
+        // Ajustar la cantidad a vender considerando la comisión de compra
+        // Binance cobra comisión en la moneda que estás comprando (BTC)
+        const adjustedQuantity = buyQuantity - buyCommission;
+
+        // Redondear a la baja según el stepSize de Binance (0.00001 para BTC)
+        const stepSize = 0.00001;
+        const sellQuantity = Math.floor(adjustedQuantity / stepSize) * stepSize;
+
+        this.logger.log(`📊 Ajuste de cantidad: Original=${buyQuantity}, Ajustada=${sellQuantity} (comisión=${buyCommission})`);
+
         const sellMovement = await this.signalDbService.createMovement({
-            signalId: buySignalId,
+            signalId: signal.id,
             type: MovementType.SELL,
-            price: candle.close,
-            quantity: buyQuantity, // Usar la cantidad convertida
-            totalAmount,
-            commission,
-            netAmount
+            price: signal.takeProfit,
+            quantity: sellQuantity, // Usar la cantidad ajustada por comisión
+            totalAmount: signal.takeProfit * sellQuantity,
+            commission: signal.takeProfit * sellQuantity * this.COMMISSION,
+            netAmount: signal.takeProfit * sellQuantity - signal.takeProfit * sellQuantity * this.COMMISSION - buyCommission
         });
 
         // Solo marcar como FILLED automáticamente en paper trading
-        if (this.PAPER_TRADING) {
-            // En paper trading, marcar automáticamente el movimiento como ejecutado
-            this.logger.log(`📝 Marcando movimiento de venta como FILLED (Paper Trading): ${sellMovement.id}`);
-            await this.signalDbService.updateMovementStatus(sellMovement.id, MovementStatus.FILLED);
-            this.logger.log(`✅ Movimiento de venta marcado como FILLED - La señal debería cerrarse automáticamente`);
+        // if (this.PAPER_TRADING) {
+        //     // En paper trading, marcar automáticamente el movimiento como ejecutado
+        //     this.logger.log(`📝 Marcando movimiento de venta como FILLED (Paper Trading): ${sellMovement.id}`);
+        //     await this.signalDbService.updateMovementStatus(sellMovement.id, MovementStatus.FILLED);
+        //     this.logger.log(`✅ Movimiento de venta marcado como FILLED - La señal debería cerrarse automáticamente`);
 
-            // Verificar explícitamente que la señal se haya cerrado
-            const finalSignal = await this.signalDbService.getSignalById(buySignalId);
-            if (finalSignal && finalSignal.status === SignalStatus.MATCHED) {
-                this.logger.log(`🎯 Señal ${buySignalId} cerrada exitosamente con status: ${finalSignal.status}`);
-            } else if (finalSignal) {
-                this.logger.warn(`⚠️ Señal ${buySignalId} no se cerró automáticamente, status actual: ${finalSignal.status}`);
-            }
-        } else {
-            // En trading real, crear orden en Binance usando el movimiento de venta recién creado
-            this.logger.log(`🔄 Enviando orden de venta a Binance: ${sellMovement.id}`);
-            await this.executeBinanceOrder(sellMovement.id, {
-                symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
-                side: 'SELL',
-                type: 'MARKET',
-                quantity: buyQuantity // Usar la cantidad convertida
-            });
-        }
+        //     // Verificar explícitamente que la señal se haya cerrado
+        //     const finalSignal = await this.signalDbService.getSignalById(buySignalId);
+        //     if (finalSignal && finalSignal.status === SignalStatus.MATCHED) {
+        //         this.logger.log(`🎯 Señal ${buySignalId} cerrada exitosamente con status: ${finalSignal.status}`);
+        //     } else if (finalSignal) {
+        //         this.logger.warn(`⚠️ Señal ${buySignalId} no se cerró automáticamente, status actual: ${finalSignal.status}`);
+        //     }
+        // } else {
+        // En trading real, crear orden en Binance usando el movimiento de venta recién creado
+        this.logger.log(`🔄 Enviando orden de venta a Binance: ${sellMovement.id}`);
+        await this.newExecuteBinanceOrder(sellMovement.id, {
+            symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
+            side: 'SELL',
+            type: 'LIMIT',
+            quantity: buyQuantity, // Usar la cantidad convertida
+            price: signal.takeProfit,
+            timeInForce: 'GTC',
+        });
+        // }
 
         // La señal se marcará automáticamente como MATCHED por el servicio cuando detecte compra+venta
 
         this.dailySignalCount++;
 
-        this.logger.log(`🔴 SEÑAL DE VENTA creada: ${candle.close} | Profit: ${(profit * 100).toFixed(2)}% | Net PnL: ${netProfit.toFixed(2)} USDT`);
+        // this.logger.log(`🔴 SEÑAL DE VENTA creada: ${candle.close} | Profit: ${(profit * 100).toFixed(2)}% | Net PnL: ${netProfit.toFixed(2)} USDT`);
 
         // Emitir evento para el trading service
-        this.emitTradeSignal('sell', candle.close, atr, buySignalId);
+        this.emitTradeSignal('sell', candle.close, atr, signal.id);
     }
 
     private async createQuickSellSignal(

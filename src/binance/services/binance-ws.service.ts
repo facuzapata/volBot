@@ -1,21 +1,31 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 const WebSocket = require('ws');
 import { StrategyCallback } from 'src/strategy/interfaces/strategy-callback.interface';
-import { StrategyService } from 'src/strategy/services/strategy.service';
+// import { StrategyService } from 'src/strategy/services/strategy.service'; // Original service (backup)
+import { MultiUserStrategyService } from 'src/strategy/services/multi-user-strategy.service'; // New multi-user service
 
 @Injectable()
 export class BinanceWsService implements OnModuleInit, OnModuleDestroy {
     private ws: any = null;
     private strategyCallback: StrategyCallback | null = null;
 
-    constructor(private readonly strategyService: StrategyService) { }
+    // Using new multi-user service
+    constructor(private readonly multiUserStrategyService: MultiUserStrategyService) { }
+
+    // Original constructor (backup)
+    // constructor(private readonly strategyService: StrategyService) { }
 
     setCallback(callback: StrategyCallback) {
         this.strategyCallback = callback;
     }
 
     onModuleInit() {
-        this.setCallback(this.strategyService);
+        // Using new multi-user service
+        this.setCallback(this.multiUserStrategyService);
+
+        // Original implementation (backup)
+        // this.setCallback(this.strategyService);
+
         this.connect();
     }
     onModuleDestroy() {
