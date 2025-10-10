@@ -7,6 +7,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { StrategyModule } from './strategy/strategy.module';
 import { TradingModule } from './traiding/trading.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { UsersModule } from './users/users.module'; // New multi-user module
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     StrategyModule,
     TradingModule,
     NotificationsModule,
+    UsersModule, // Add users module for multi-user support
   ],
 })
 export class AppModule { }

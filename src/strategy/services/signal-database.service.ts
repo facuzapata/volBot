@@ -84,6 +84,24 @@ export class SignalDatabaseService {
         return savedMovement;
     }
 
+    async updateStatusSignal(
+        signalId: string,
+        status: SignalStatus,
+    ): Promise<Signal> {
+        const signal = await this.signalRepository.findOne({
+            where: { id: signalId },
+        });
+
+        if (!signal) {
+            throw new Error(`Signal with id ${signalId} not found`);
+        }
+
+        signal.status = status;
+        const updatedSignal = await this.signalRepository.save(signal);
+        this.logger.log(`🔄 Señal actualizada: ${updatedSignal.id} - ${updatedSignal.status.toUpperCase()}`);
+        return updatedSignal;
+    }
+
     async updateMovementStatus(
         movementId: string,
         status: MovementStatus,
@@ -108,8 +126,21 @@ export class SignalDatabaseService {
             movement.executedAt = new Date();
         }
 
+        // Asignar explícitamente cada campo de Binance para asegurar que se guarden correctamente
         if (binanceData) {
-            Object.assign(movement, binanceData);
+            if (binanceData.binanceOrderId) {
+                movement.binanceOrderId = binanceData.binanceOrderId;
+            }
+            if (binanceData.binanceClientOrderId) {
+                movement.binanceClientOrderId = binanceData.binanceClientOrderId;
+            }
+            if (binanceData.binanceResponse) {
+                movement.binanceResponse = binanceData.binanceResponse;
+                this.logger.log(`📊 Guardando respuesta de Binance para movimiento ${movementId}: ${JSON.stringify(binanceData.binanceResponse)}`);
+            }
+            if (binanceData.binanceError) {
+                movement.binanceError = binanceData.binanceError;
+            }
         }
 
         const updatedMovement = await this.movementRepository.save(movement);
@@ -335,30 +366,6 @@ export class SignalDatabaseService {
             where: { status: SignalStatus.ACTIVE },
             relations: ['movements']
         });
-
-        this.logger.debug(`🔍 Consulta getActiveSignals() encontró ${activeSignals.length} señales con status ACTIVE`);
-
-        // Debug detallado de cada señal activa
-        for (const signal of activeSignals) {
-            const buyMovements = signal.movements.filter(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
-            const sellMovements = signal.movements.filter(m => m.type === MovementType.SELL && m.status === MovementStatus.FILLED);
-
-            this.logger.debug(`  📊 Señal ${signal.id}:`);
-            this.logger.debug(`    - Status: ${signal.status}`);
-            this.logger.debug(`    - Precio inicial: ${signal.initialPrice}`);
-            this.logger.debug(`    - Total movimientos: ${signal.movements.length}`);
-            this.logger.debug(`    - Compras FILLED: ${buyMovements.length}`);
-            this.logger.debug(`    - Ventas FILLED: ${sellMovements.length}`);
-            this.logger.debug(`    - Creada: ${signal.createdAt}`);
-
-            // Si tiene compra y venta FILLED pero sigue como ACTIVE, algo está mal
-            if (buyMovements.length > 0 && sellMovements.length > 0) {
-                this.logger.warn(`⚠️ INCONSISTENCIA: Señal ${signal.id} tiene compra y venta FILLED pero sigue ACTIVE`);
-                this.logger.warn(`    Intentando cerrar señal manualmente...`);
-                await this.checkAndCloseSignal(signal.id);
-            }
-        }
-
         return activeSignals;
     }
 
@@ -443,6 +450,161 @@ export class SignalDatabaseService {
         return await this.movementRepository.createQueryBuilder('movement')
             .leftJoinAndSelect('movement.signal', 'signal')
             .where('movement.status = :status', { status: MovementStatus.PENDING })
+            .andWhere('movement.binanceOrderId IS NOT NULL')
+            .getMany();
+    }
+
+    // ===== MÉTODOS PARA SISTEMA MULTI-USUARIO =====
+
+    /**
+     * Crear señal para un usuario específico
+     */
+    async createSignalForUser(userId: string, signalData: {
+        symbol: string;
+        initialPrice: number;
+        stopLoss: number;
+        takeProfit: number;
+        atr: number;
+        rsi: number;
+        macd: number;
+        smaShort: number;
+        smaLong: number;
+        volume: number;
+        paperTrading: boolean;
+    }): Promise<Signal> {
+        const signal = this.signalRepository.create({
+            ...signalData,
+            userId, // Agregar userId a la señal
+            status: SignalStatus.ACTIVE,
+            finalPrice: 0,
+            totalProfit: 0,
+            totalCommission: 0,
+            netProfit: 0,
+        });
+
+        const savedSignal = await this.signalRepository.save(signal);
+        this.logger.log(`📊 [Usuario ${userId}] Nueva señal creada: ${savedSignal.id} - ${savedSignal.symbol} @ ${savedSignal.initialPrice}`);
+        return savedSignal;
+    }
+
+    /**
+     * Obtener señales activas para un usuario específico
+     */
+    async getActiveSignalsForUser(userId: string): Promise<Signal[]> {
+        return await this.signalRepository.find({
+            where: {
+                userId,
+                status: SignalStatus.ACTIVE
+            },
+            relations: ['movements'],
+            order: { createdAt: 'DESC' }
+        });
+    }
+
+    /**
+     * Obtener todas las señales de un usuario con filtros opcionales
+     */
+    async getSignalsForUser(userId: string, options?: {
+        status?: SignalStatus;
+        limit?: number;
+        offset?: number;
+    }): Promise<Signal[]> {
+        const query = this.signalRepository.createQueryBuilder('signal')
+            .leftJoinAndSelect('signal.movements', 'movements')
+            .where('signal.userId = :userId', { userId })
+            .orderBy('signal.createdAt', 'DESC');
+
+        if (options?.status) {
+            query.andWhere('signal.status = :status', { status: options.status });
+        }
+
+        if (options?.limit) {
+            query.limit(options.limit);
+        }
+
+        if (options?.offset) {
+            query.offset(options.offset);
+        }
+
+        return await query.getMany();
+    }
+
+    /**
+     * Obtener estadísticas de trading para un usuario específico
+     */
+    async getUserTradingStats(userId: string): Promise<{
+        totalSignals: number;
+        activeSignals: number;
+        matchedSignals: number;
+        totalProfit: number;
+        totalCommission: number;
+        totalNetProfit: number;
+        successRate: number;
+        avgProfitPerSignal: number;
+    }> {
+        const [totalSignals, activeSignals, matchedSignals] = await Promise.all([
+            this.signalRepository.count({ where: { userId } }),
+            this.signalRepository.count({ where: { userId, status: SignalStatus.ACTIVE } }),
+            this.signalRepository.count({ where: { userId, status: SignalStatus.MATCHED } })
+        ]);
+
+        const profitResult = await this.signalRepository
+            .createQueryBuilder('signal')
+            .select('SUM(signal.totalProfit)', 'totalProfit')
+            .addSelect('SUM(signal.totalCommission)', 'totalCommission')
+            .addSelect('SUM(signal.netProfit)', 'totalNetProfit')
+            .where('signal.userId = :userId', { userId })
+            .andWhere('signal.status = :status', { status: SignalStatus.MATCHED })
+            .getRawOne();
+
+        const totalProfit = parseFloat(profitResult.totalProfit || '0');
+        const totalCommission = parseFloat(profitResult.totalCommission || '0');
+        const totalNetProfit = parseFloat(profitResult.totalNetProfit || '0');
+
+        const profitableSignals = await this.signalRepository.count({
+            where: {
+                userId,
+                status: SignalStatus.MATCHED,
+                netProfit: { moreThan: 0 } as any
+            }
+        });
+
+        const successRate = matchedSignals > 0 ? (profitableSignals / matchedSignals) * 100 : 0;
+        const avgProfitPerSignal = matchedSignals > 0 ? totalNetProfit / matchedSignals : 0;
+
+        return {
+            totalSignals,
+            activeSignals,
+            matchedSignals,
+            totalProfit,
+            totalCommission,
+            totalNetProfit,
+            successRate,
+            avgProfitPerSignal
+        };
+    }
+
+    /**
+     * Obtener movimientos fallidos para un usuario específico
+     */
+    async getFailedMovementsForUser(userId: string, olderThan: Date): Promise<Movement[]> {
+        return await this.movementRepository.createQueryBuilder('movement')
+            .leftJoinAndSelect('movement.signal', 'signal')
+            .where('signal.userId = :userId', { userId })
+            .andWhere('movement.status = :status', { status: MovementStatus.PENDING })
+            .andWhere('movement.binanceOrderId IS NULL')
+            .andWhere('movement.createdAt < :olderThan', { olderThan })
+            .getMany();
+    }
+
+    /**
+     * Obtener movimientos pendientes con orderId para un usuario específico
+     */
+    async getPendingMovementsWithOrderIdForUser(userId: string): Promise<Movement[]> {
+        return await this.movementRepository.createQueryBuilder('movement')
+            .leftJoinAndSelect('movement.signal', 'signal')
+            .where('signal.userId = :userId', { userId })
+            .andWhere('movement.status = :status', { status: MovementStatus.PENDING })
             .andWhere('movement.binanceOrderId IS NOT NULL')
             .getMany();
     }
