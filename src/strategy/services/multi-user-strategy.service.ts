@@ -31,9 +31,6 @@ export class MultiUserStrategyService implements OnModuleInit {
     // Constantes compartidas
     private readonly COMMISSION = 0.001;
     private readonly MIN_PROFIT_MARGIN = 0.005;
-    private readonly QUICK_SELL_MARGIN = 0.004;
-    private readonly HIGH_VOLATILITY_THRESHOLD = 1.5;
-    private readonly ULTRA_CONSERVATIVE_MODE = true;
     private readonly PAPER_TRADING: boolean;
     private readonly maxDailySignalsDefault = 300;
 
@@ -240,13 +237,13 @@ export class MultiUserStrategyService implements OnModuleInit {
         const condition3 = latestMACD > latestSignal || latestHistogram > 0;
         const condition4 = bullishEngulfing || candle.close > candle.open;
         const condition5 = priceNearBBLower || candle.close < smaShort;
-        const condition6 = volumeConfirmation;
+        // const condition6 = volumeConfirmation;
         const condition7 = candle.close > smaLong * 0.995;
 
-        const buyConditions = [condition1, condition2, condition3, condition4, condition5, condition6, condition7];
+        const buyConditions = [condition1, condition2, condition3, condition4, condition5, condition7];
         const passedConditions = buyConditions.filter(Boolean).length;
 
-        this.logger.debug(`📈 [Usuario ${userId}] Resultado: ${passedConditions}/7 condiciones cumplidas`);
+        this.logger.debug(`📈 [Usuario ${userId}] Resultado: ${passedConditions}/6 condiciones cumplidas`);
 
         // Necesitamos al menos 5 de 7 condiciones para generar señal
         if (passedConditions >= 5) {
@@ -507,7 +504,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         if (price <= 0) return false;
 
         const minPriceMovement = price * (2 * this.COMMISSION + this.MIN_PROFIT_MARGIN);
-        if (side === 'buy' && atr < minPriceMovement) {
+        if (side === 'buy' && atr < minPriceMovement * 0.1) {
             this.logger.debug(`📊 [Usuario ${userId}] ATR insuficiente para rentabilidad: ${atr} < ${minPriceMovement}`);
             return false;
         }
