@@ -6,10 +6,14 @@ import { MultiBinanceService } from './services/multi-binance.service';
 import { StrategyModule } from 'src/strategy/strategy.module';
 import { User } from '../users/entities/user.entity';
 import { UserCredentials } from '../users/entities/user-credentials.entity';
+import { SignalDatabaseService } from '../strategy/services/signal-database.service';
+import { Signal, Movement } from '../strategy/entities';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, UserCredentials]),
+    TypeOrmModule.forFeature([User, UserCredentials, Signal, Movement]),
+    NotificationsModule, // Para el SignalDatabaseService
     forwardRef(() => StrategyModule)
   ],
   providers: [
@@ -18,7 +22,10 @@ import { UserCredentials } from '../users/entities/user-credentials.entity';
     // BinanceService,
 
     // New multi-user service
-    MultiBinanceService
+    MultiBinanceService,
+
+    // Shared service needed by MultiBinanceService
+    SignalDatabaseService
   ],
   exports: [
     BinanceWsService,

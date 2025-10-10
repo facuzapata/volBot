@@ -608,4 +608,91 @@ export class SignalDatabaseService {
             .andWhere('movement.binanceOrderId IS NOT NULL')
             .getMany();
     }
+
+    /**
+     * Actualizar movimiento con datos de la orden de Binance
+     */
+    async updateMovementWithOrderData(movementId: string, orderData: {
+        binanceOrderId: number;
+        clientOrderId: string;
+        status: string;
+        executedQty?: string;
+        price?: string;
+        fills?: any[];
+        transactTime?: number;
+        fullResponse?: any;
+    }): Promise<Movement> {
+        const updateData: any = {
+            binanceOrderId: orderData.binanceOrderId.toString(),
+            binanceClientOrderId: orderData.clientOrderId,
+            binanceResponse: orderData.fullResponse || {
+                orderId: orderData.binanceOrderId,
+                clientOrderId: orderData.clientOrderId,
+                status: orderData.status,
+                executedQty: orderData.executedQty,
+                price: orderData.price,
+                fills: orderData.fills,
+                transactTime: orderData.transactTime
+            }
+        };
+
+        // Actualizar status basado en la respuesta de Binance
+        if (orderData.status === 'FILLED') {
+            updateData.status = MovementStatus.FILLED;
+            updateData.executedAt = orderData.transactTime ? new Date(orderData.transactTime) : new Date();
+        } else if (orderData.status === 'CANCELED') {
+            updateData.status = MovementStatus.CANCELLED;
+        } else if (orderData.status === 'REJECTED') {
+            updateData.status = MovementStatus.FAILED;
+        } else {
+            updateData.status = MovementStatus.PENDING;
+        }
+
+        await this.movementRepository.update(movementId, updateData);
+
+        const updatedMovement = await this.movementRepository.findOne({
+            where: { id: movementId },
+            relations: ['signal']
+        });
+
+        if (!updatedMovement) {
+            throw new Error(`Movimiento ${movementId} no encontrado después de actualizar`);
+        }
+
+        this.logger.log(`📝 Movimiento ${movementId} actualizado con datos de Binance: OrderId=${orderData.binanceOrderId}, Status=${orderData.status}`);
+
+        // Verificar si la señal debe cerrarse automáticamente
+        await this.checkAndCloseSignal(updatedMovement.signalId);
+
+        return updatedMovement;
+    }
+
+    /**
+     * Actualizar movimiento con error de Binance
+     */
+    async updateMovementWithError(movementId: string, error: any): Promise<Movement> {
+        const updateData: Partial<Movement> = {
+            binanceError: {
+                code: error.code,
+                msg: error.msg,
+                error: error.message || error.toString(),
+                timestamp: new Date().toISOString()
+            },
+            status: MovementStatus.FAILED
+        };
+
+        await this.movementRepository.update(movementId, updateData);
+
+        const updatedMovement = await this.movementRepository.findOne({
+            where: { id: movementId },
+            relations: ['signal']
+        });
+
+        if (!updatedMovement) {
+            throw new Error(`Movimiento ${movementId} no encontrado después de actualizar con error`);
+        }
+
+        this.logger.log(`📝 Movimiento ${movementId} marcado como fallido: ${error.code} - ${error.msg || error.message}`);
+        return updatedMovement;
+    }
 }

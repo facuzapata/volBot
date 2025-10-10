@@ -2,8 +2,10 @@ import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/commo
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import Binance from 'binance-api-node';
 import { CreateOrderParams } from '../interfaces/create-order-params';
+import { MovementStatus } from 'src/strategy/entities';
 
 export interface BinanceOrderResponse {
+    id(id: any, FILLED: MovementStatus, arg2: { binanceResponse: BinanceOrderResponse; }): unknown;
     symbol: string;
     orderId: number;
     orderListId: number;
