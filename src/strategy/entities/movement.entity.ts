@@ -15,6 +15,7 @@ export enum MovementStatus {
 
 @Entity('movements')
 export class Movement {
+
     @PrimaryGeneratedColumn('uuid')
     id: string;
 

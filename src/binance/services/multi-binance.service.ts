@@ -7,6 +7,7 @@ import { User } from '../../users/entities/user.entity';
 import { UserCredentials } from '../../users/entities/user-credentials.entity';
 import { CreateOrderParams } from '../interfaces/create-order-params';
 import { BinanceOrderResponse } from './binance.service';
+import { SignalDatabaseService } from '../../strategy/services/signal-database.service';
 
 interface UserBinanceClient {
     client: any;
@@ -28,7 +29,8 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
         @InjectRepository(User)
         private userRepository: Repository<User>,
         @InjectRepository(UserCredentials)
-        private credentialsRepository: Repository<UserCredentials>
+        private credentialsRepository: Repository<UserCredentials>,
+        private signalDbService: SignalDatabaseService
     ) { }
 
     async onModuleInit() {
@@ -150,7 +152,7 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
         return userClient;
     }
 
-    async createOrderForUser(userId: string, params: CreateOrderParams): Promise<BinanceOrderResponse> {
+    async createOrderForUser(userId: string, params: CreateOrderParams, movementId?: string): Promise<BinanceOrderResponse> {
         const userClient = await this.getUserClient(userId);
         if (!userClient) {
             throw new Error(`Cliente no disponible para usuario ${userId}`);
@@ -173,7 +175,15 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
         };
 
         if (params.type === 'LIMIT') {
-            orderParams.price = params.price?.toFixed(2);
+            const priceNumber = Number(params.price);
+
+            if (isNaN(priceNumber)) {
+                throw new Error(`Precio inválido: ${params.price}`);
+            }
+
+            console.log('Precio original:', priceNumber);
+            orderParams.price = Number(priceNumber.toFixed(2));
+            console.log('Precio formateado:', orderParams.price);
             orderParams.timeInForce = params.timeInForce || 'GTC';
         }
 
@@ -183,6 +193,12 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
             const response = await userClient.client.order(orderParams);
 
             this.logger.log(`✅ [${userClient.user.email}] Orden creada: ${response.orderId} - Status: ${response.status}`);
+
+            // Si se proporciona movementId, actualizar el movimiento con los datos de Binance
+            if (movementId) {
+                await this.updateMovementWithBinanceData(movementId, response);
+            }
+
             return response;
 
         } catch (error) {
@@ -191,7 +207,18 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
                 await this.syncServerTime(userId);
                 const response = await userClient.client.order(orderParams);
                 this.logger.log(`✅ [${userClient.user.email}] Orden creada después de re-sincronizar: ${response.orderId}`);
+
+                // Actualizar movimiento después del retry también
+                if (movementId) {
+                    await this.updateMovementWithBinanceData(movementId, response);
+                }
+
                 return response;
+            }
+
+            // En caso de error, actualizar el movimiento con el error
+            if (movementId) {
+                await this.updateMovementWithError(movementId, error);
             }
 
             this.logger.error(`❌ [${userClient.user.email}] Error creando orden:`, error);
@@ -299,5 +326,58 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
     async removeUser(userId: string): Promise<void> {
         this.userClients.delete(userId);
         this.logger.log(`🗑️ Cliente removido para usuario ${userId}`);
+    }
+
+    async getOrderStatus(symbol: string, orderId: number, userId: string): Promise<BinanceOrderResponse> {
+        try {
+            const userClient = await this.getUserClient(userId);
+
+            if (!userClient) {
+                throw new Error(`Cliente no disponible para usuario ${userId}`);
+            }
+
+            const response = await userClient.client.getOrder({
+                symbol,
+                orderId,
+            });
+            return response;
+        } catch (error) {
+            this.logger.error(`Error consultando orden ${orderId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Actualizar movimiento con datos exitosos de Binance
+     */
+    private async updateMovementWithBinanceData(movementId: string, binanceResponse: BinanceOrderResponse): Promise<void> {
+        try {
+            await this.signalDbService.updateMovementWithOrderData(movementId, {
+                binanceOrderId: binanceResponse.orderId,
+                clientOrderId: binanceResponse.clientOrderId,
+                status: binanceResponse.status,
+                executedQty: binanceResponse.executedQty,
+                price: binanceResponse.price,
+                fills: binanceResponse.fills,
+                transactTime: binanceResponse.transactTime,
+                fullResponse: binanceResponse
+            });
+
+            this.logger.log(`📝 Movimiento ${movementId} actualizado con datos de Binance exitosamente`);
+        } catch (error) {
+            this.logger.error(`❌ Error actualizando movimiento ${movementId} con datos de Binance:`, error);
+        }
+    }
+
+    /**
+     * Actualizar movimiento con error de Binance
+     */
+    private async updateMovementWithError(movementId: string, error: any): Promise<void> {
+        try {
+            await this.signalDbService.updateMovementWithError(movementId, error);
+            this.logger.log(`📝 Movimiento ${movementId} marcado como fallido debido a error de Binance`);
+        } catch (updateError) {
+            this.logger.error(`❌ Error actualizando movimiento ${movementId} con error:`, updateError);
+        }
     }
 }

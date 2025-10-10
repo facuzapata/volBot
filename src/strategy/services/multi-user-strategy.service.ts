@@ -7,7 +7,7 @@ import { MultiBinanceService } from '../../binance/services/multi-binance.servic
 import { SignalDatabaseService } from './signal-database.service';
 import { CandleCacheService } from './candle-cache.service';
 import { TradeSignal } from '../interfaces/traide-signal.interface';
-import { Signal } from '../entities/signal.entity';
+import { Signal, SignalStatus } from '../entities/signal.entity';
 import { MovementType, MovementStatus } from '../entities/movement.entity';
 import * as indicators from '../../utils/indicators';
 
@@ -137,7 +137,51 @@ export class MultiUserStrategyService implements OnModuleInit {
 
             // Obtener señales activas del usuario
             const activeSignals = await this.signalDbService.getActiveSignalsForUser(userId);
+            let hasPendingSell = false; // <-- Flag
 
+            for (const signal of activeSignals) {
+                const buyPendingMovement = signal.movements.find(m =>
+                    m.type === MovementType.BUY && m.status === MovementStatus.PENDING
+                );
+                const sellPendingMovement = signal.movements.find(m =>
+                    m.type === MovementType.SELL && m.status === MovementStatus.PENDING
+                );
+
+                if (buyPendingMovement) {
+                    this.logger.debug(`📊 [Usuario ${userId}] Señal activa con movimiento de compra pendiente`);
+                    const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(buyPendingMovement.binanceOrderId), userId);
+                    if (orderStatus.status === 'FILLED') {
+                        await this.signalDbService.updateMovementStatus(
+                            buyPendingMovement.id,
+                            MovementStatus.FILLED,
+                            { binanceResponse: orderStatus }
+                        );
+                        continue; // No continuar con esta señal
+                    }
+                }
+                if (sellPendingMovement) {
+                    hasPendingSell = true; // <-- Set flag
+                    this.logger.debug(`📊 [Usuario ${userId}] Señal activa con movimiento de venta pendiente`);
+                    const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(sellPendingMovement.binanceOrderId), userId);
+                    if (orderStatus.status === 'FILLED') {
+                        await this.signalDbService.updateMovementStatus(
+                            sellPendingMovement.id,
+                            MovementStatus.FILLED,
+                            { binanceResponse: orderStatus }
+                        );
+                        await this.signalDbService.updateStatusSignal(
+                            signal.id,
+                            SignalStatus.MATCHED,
+                        );
+                        continue; // No continuar con esta señal
+                    }
+                    continue;
+                }
+            }
+            if (hasPendingSell) {
+                this.logger.debug(`⏸️ [Usuario ${userId}] Tiene una o más órdenes SELL pendientes, se omite creación de nuevas señales.`);
+                return;
+            }
             // Verificar si puede crear nuevas señales de compra
             const canCreateNewSignals = activeSignals.length < userConfig.maxActiveSignals;
 
@@ -276,24 +320,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         for (const signal of buySignals) {
             const buyMovement = signal.movements.find(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
             if (!buyMovement) continue;
-
-            const buyPrice = Number(buyMovement.price);
-            const currentProfit = (candle.close - buyPrice) / buyPrice;
-            const profitPercent = currentProfit * 100;
-
-            // Usar el margen de venta personalizado del usuario
-            const userSellMargin = userConfig.sellMargin * 100; // convertir a porcentaje
-
-            this.logger.debug(`📊 [Usuario ${userId}] Señal ${signal.id}: Profit=${profitPercent.toFixed(3)}%, Margen requerido=${userSellMargin.toFixed(3)}%`);
-
-            // Condiciones de venta usando configuración del usuario
-            const hasMinProfit = profitPercent >= userSellMargin;
-            const hasGoodProfit = profitPercent >= (userConfig.profitMargin * 100);
-
-            if (hasMinProfit || hasGoodProfit) {
-                this.logger.log(`🔴 [Usuario ${userId}] GENERANDO SEÑAL DE VENTA para ${signal.id} - Profit: ${profitPercent.toFixed(3)}%`);
-                await this.createSellSignalForUser(userId, userConfig, candle, signal, atr);
-            }
+            await this.createSellSignalForUser(userId, userConfig, candle, signal, atr);
         }
     }
 
@@ -338,7 +365,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         const commission = totalAmount * this.COMMISSION;
         const netAmount = totalAmount + commission;
 
-        await this.signalDbService.createMovement({
+        const movement = await this.signalDbService.createMovement({
             signalId: signal.id,
             type: MovementType.BUY,
             price: candle.close,
@@ -356,7 +383,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                     side: 'BUY',
                     type: 'MARKET',
                     quantity: positionSize
-                });
+                }, movement.id); // Pasar el ID del movimiento para actualizar con datos de Binance
             } catch (error) {
                 this.logger.error(`❌ [Usuario ${userId}] Error ejecutando orden de compra:`, error);
             }
@@ -408,7 +435,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                     quantity: buyQuantity,
                     price: sellPrice,
                     timeInForce: 'GTC'
-                });
+                }, sellMovement.id); // Pasar el ID del movimiento para actualizar con datos de Binance
             } catch (error) {
                 this.logger.error(`❌ [Usuario ${userId}] Error ejecutando orden de venta:`, error);
             }
