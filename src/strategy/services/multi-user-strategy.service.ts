@@ -411,7 +411,10 @@ export class MultiUserStrategyService implements OnModuleInit {
         const buyMovement = signal.movements.find(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
         if (!buyMovement) return;
 
+        // Cantidad comprada bruta
         const buyQuantity = Number(buyMovement.quantity);
+
+        const netQuantity = buyQuantity * (1 - this.COMMISSION); // 👈 se descuenta la comisión real
         const sellPrice = signal.takeProfit;
 
         // Crear movimiento de venta
@@ -419,7 +422,7 @@ export class MultiUserStrategyService implements OnModuleInit {
             signalId: signal.id,
             type: MovementType.SELL,
             price: sellPrice,
-            quantity: buyQuantity,
+            quantity: netQuantity,
             totalAmount: sellPrice * buyQuantity,
             commission: sellPrice * buyQuantity * this.COMMISSION,
             netAmount: sellPrice * buyQuantity - sellPrice * buyQuantity * this.COMMISSION
@@ -432,7 +435,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                     symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
                     side: 'SELL',
                     type: 'LIMIT',
-                    quantity: buyQuantity,
+                    quantity: netQuantity,
                     price: sellPrice,
                     timeInForce: 'GTC'
                 }, sellMovement.id); // Pasar el ID del movimiento para actualizar con datos de Binance
@@ -450,10 +453,10 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.log(`🔴 [Usuario ${userId}] SEÑAL DE VENTA creada para señal ${signal.id}`);
 
         // Emitir evento
-        this.emitTradeSignalForUser(userId, 'sell', candle.close, atr, signal.id);
+        this.emitTradeSignalForUser(userId, 'sell', candle.close, atr, signal.id, netQuantity);
     }
 
-    private emitTradeSignalForUser(userId: string, side: 'buy' | 'sell', price: number, atr: number, signalId: string) {
+    private emitTradeSignalForUser(userId: string, side: 'buy' | 'sell', price: number, atr: number, signalId: string, netQuantity?: number) {
         const userConfig = this.userConfigs.get(userId);
         if (!userConfig) return;
 
@@ -462,7 +465,13 @@ export class MultiUserStrategyService implements OnModuleInit {
 
         const stopLoss = side === 'buy' ? price * (1 - stopLossPercent) : price * (1 + stopLossPercent);
         const takeProfit = side === 'buy' ? price * (1 + takeProfitPercent) : price * (1 - takeProfitPercent);
-        const positionSize = userConfig.capitalPerTrade / price;
+        let positionSize: number;
+        if (side === 'buy') {
+            positionSize = userConfig.capitalPerTrade / price;
+        } else {
+            positionSize = netQuantity || 0;
+        }
+
 
         const tradeSignal: TradeSignal & { userId: string } = {
             id: signalId,
