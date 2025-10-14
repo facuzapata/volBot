@@ -129,15 +129,10 @@ export class MultiUserStrategyService implements OnModuleInit {
         candles: indicators.Candle[]
     ) {
         try {
-            // Verificar límites diarios del usuario
-            if (userConfig.dailySignalCount >= this.maxDailySignalsDefault) {
-                this.logger.debug(`📊 [Usuario ${userId}] Límite diario alcanzado: ${userConfig.dailySignalCount}/${this.maxDailySignalsDefault}`);
-                return;
-            }
+            if (userConfig.dailySignalCount >= this.maxDailySignalsDefault) return;
 
-            // Obtener señales activas del usuario
             const activeSignals = await this.signalDbService.getActiveSignalsForUser(userId);
-            let hasPendingSell = false; // <-- Flag
+            let hasPendingSell = false;
 
             for (const signal of activeSignals) {
                 const buyPendingMovement = signal.movements.find(m =>
@@ -147,45 +142,43 @@ export class MultiUserStrategyService implements OnModuleInit {
                     m.type === MovementType.SELL && m.status === MovementStatus.PENDING
                 );
 
+                const buyFilledMovement = signal.movements.find(m =>
+                    m.type === MovementType.BUY && m.status === MovementStatus.FILLED
+                );
+
+                const sellFilledMovement = signal.movements.find(m =>
+                    m.type === MovementType.SELL && m.status === MovementStatus.FILLED
+                );
+
+                // ✅ 1. Actualizar BUY pendientes
                 if (buyPendingMovement) {
-                    this.logger.debug(`📊 [Usuario ${userId}] Señal activa con movimiento de compra pendiente`);
                     const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(buyPendingMovement.binanceOrderId), userId);
+                    console.log('orderStatus', orderStatus);
                     if (orderStatus.status === 'FILLED') {
-                        await this.signalDbService.updateMovementStatus(
-                            buyPendingMovement.id,
-                            MovementStatus.FILLED,
-                            { binanceResponse: orderStatus }
-                        );
-                        continue; // No continuar con esta señal
+                        await this.signalDbService.updateMovementStatus(buyPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
+                        this.logger.debug(`✅ [Usuario ${userId}] BUY completado para ${signal.symbol}`);
                     }
                 }
+
+                // ✅ 2. Actualizar SELL pendientes
                 if (sellPendingMovement) {
-                    hasPendingSell = true; // <-- Set flag
-                    this.logger.debug(`📊 [Usuario ${userId}] Señal activa con movimiento de venta pendiente`);
+                    hasPendingSell = true;
                     const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(sellPendingMovement.binanceOrderId), userId);
                     if (orderStatus.status === 'FILLED') {
-                        await this.signalDbService.updateMovementStatus(
-                            sellPendingMovement.id,
-                            MovementStatus.FILLED,
-                            { binanceResponse: orderStatus }
-                        );
-                        await this.signalDbService.updateStatusSignal(
-                            signal.id,
-                            SignalStatus.MATCHED,
-                        );
-                        continue; // No continuar con esta señal
+                        await this.signalDbService.updateMovementStatus(sellPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
+                        await this.signalDbService.updateStatusSignal(signal.id, SignalStatus.MATCHED);
+                        this.logger.debug(`💰 [Usuario ${userId}] SELL completado para ${signal.symbol}`);
                     }
-                    continue;
                 }
+                // 🧠 Marcar la señal como "lista para vender" si tiene BUY FILLED y no tiene SELL pendiente/filled
+                const hasBuyFilled = !!buyFilledMovement;
+                const hasSellOpenOrFilled = !!(sellPendingMovement || sellFilledMovement);
+                signal["readyToSell"] = hasBuyFilled && !hasSellOpenOrFilled;
             }
-            if (hasPendingSell) {
-                this.logger.debug(`⏸️ [Usuario ${userId}] Tiene una o más órdenes SELL pendientes, se omite creación de nuevas señales.`);
-                return;
-            }
-            // Verificar si puede crear nuevas señales de compra
+
+            // ⚙️ 3. Seguir al análisis (sin cortar antes)
             const canCreateNewSignals = activeSignals.length < userConfig.maxActiveSignals;
 
-            // Análisis de mercado para este usuario
             await this.analyzeMarketConditionsForUser(
                 userId,
                 userConfig,
@@ -193,7 +186,8 @@ export class MultiUserStrategyService implements OnModuleInit {
                 techIndicators,
                 activeSignals,
                 candles,
-                canCreateNewSignals
+                canCreateNewSignals,
+                hasPendingSell
             );
 
         } catch (error) {
@@ -208,7 +202,8 @@ export class MultiUserStrategyService implements OnModuleInit {
         techIndicators: any,
         activeSignals: Signal[],
         candles: indicators.Candle[],
-        canCreateNewSignals: boolean
+        canCreateNewSignals: boolean,
+        hasPendingSell: boolean // 👈 nuevo
     ) {
         const {
             smaShort, smaLong, smaVeryLong, emaShort, emaLong, rsi, macd, atr, bbands, volumeMA, currentVolume
@@ -221,34 +216,53 @@ export class MultiUserStrategyService implements OnModuleInit {
 
         this.logger.debug(`📈 [Usuario ${userId}] Análisis para precio ${lastCandle.close}`);
 
-        // Determinar tendencia principal
         const isStrongUptrend = smaShort > smaLong && smaLong > smaVeryLong && emaShort > emaLong;
         const isStrongDowntrend = smaShort < smaLong && smaLong < smaVeryLong && emaShort < emaLong;
         const isRangeMarket = !isStrongUptrend && !isStrongDowntrend;
 
-        // Análisis de velas
         const bullishEngulfing = indicators.isBullishEngulfing(candles);
         const bearishEngulfing = indicators.isBearishEngulfing(candles);
         const priceNearBBLower = lastCandle.close <= bbands.lower * 1.005;
         const priceNearBBUpper = lastCandle.close >= bbands.upper * 0.995;
 
-        // Análisis de volumen
         const volumeAboveAverage = currentVolume > volumeMA * 1.2;
         const volumeConfirmation = volumeAboveAverage;
 
         this.logger.debug(`📊 [Usuario ${userId}] Señales activas: ${activeSignals.length}/${userConfig.maxActiveSignals}`);
 
-        // Buscar señales de compra (solo si puede crear nuevas)
+        // 🟢 Evaluar compras si se pueden crear nuevas señales
         if (canCreateNewSignals) {
             await this.evaluateBuySignalsForUser(userId, userConfig, lastCandle, {
-                isStrongUptrend, isRangeMarket, rsi, latestMACD, latestSignal, latestHistogram,
-                bullishEngulfing, priceNearBBLower, volumeConfirmation, atr, smaShort, smaLong, currentVolume
+                isStrongUptrend,
+                isRangeMarket,
+                rsi,
+                latestMACD,
+                latestSignal,
+                latestHistogram,
+                bullishEngulfing,
+                priceNearBBLower,
+                volumeConfirmation,
+                atr,
+                smaShort,
+                smaLong,
+                currentVolume
             });
         }
+        const signalsReadyToSell = activeSignals.filter(s => s["readyToSell"]);
+        this.logger.debug(`📊 [Usuario ${userId}] Señales listas para vender: ${signalsReadyToSell.length}`);
+        if (signalsReadyToSell.length > 0) {
+            this.logger.debug(`📈 [Usuario ${userId}] Tiene ${signalsReadyToSell.length} señales con BUY FILLED listas para vender.`);
+            await this.evaluateSellSignalsForUser(userId, userConfig, lastCandle, atr, signalsReadyToSell);
+        }
 
-        // Buscar señales de venta (SIEMPRE evaluar ventas)
-        await this.evaluateSellSignalsForUser(userId, userConfig, lastCandle, atr, activeSignals);
+        // 🔴 Evaluar ventas solo si NO hay una venta pendiente
+        if (!hasPendingSell) {
+            await this.evaluateSellSignalsForUser(userId, userConfig, lastCandle, atr, activeSignals);
+        } else {
+            this.logger.debug(`⏸️ [Usuario ${userId}] Tiene una venta pendiente, no se evaluarán nuevas señales SELL.`);
+        }
     }
+
 
     private async evaluateBuySignalsForUser(
         userId: string,
