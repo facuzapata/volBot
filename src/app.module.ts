@@ -11,7 +11,11 @@ import { UsersModule } from './users/users.module'; // New multi-user module
 
 @Module({
   imports: [
-    TypeOrmModule.forRoot(typeOrmConfig),
+    TypeOrmModule.forRoot({
+      ...typeOrmConfig,
+      retryAttempts: 3,
+      retryDelay: 3000,
+    }),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
