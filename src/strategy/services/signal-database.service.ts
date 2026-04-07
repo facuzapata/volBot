@@ -640,6 +640,40 @@ export class SignalDatabaseService {
         if (orderData.status === 'FILLED') {
             updateData.status = MovementStatus.FILLED;
             updateData.executedAt = orderData.transactTime ? new Date(orderData.transactTime) : new Date();
+
+            // IMPORTANTE: Actualizar quantity con la cantidad realmente ejecutada por Binance
+            if (orderData.executedQty) {
+                this.logger.debug(`🔍 DEBUG updateMovementWithOrderData - executedQty: ${orderData.executedQty}`);
+                this.logger.debug(`🔍 fills disponibles: ${orderData.fills ? 'SÍ' : 'NO'} (${orderData.fills?.length || 0} fills)`);
+                this.logger.debug(`🔍 fullResponse: ${JSON.stringify(orderData.fullResponse)}`);
+
+                let netQuantity = Number(orderData.executedQty);
+
+                // Si hay fills, calcular la cantidad neta después de comisiones
+                if (orderData.fills && orderData.fills.length > 0) {
+                    // Verificar si la comisión se cobra en el activo base (ej: BTC en BTCUSDT)
+                    const totalCommissionInBase = orderData.fills.reduce((sum, fill) => {
+                        // Extraer el activo base del símbolo (ej: BTC de BTCUSDT)
+                        const baseAsset = orderData.fullResponse?.symbol?.replace('USDT', '').replace('BUSD', '');
+
+                        if (fill.commissionAsset === baseAsset) {
+                            // Comisión en el activo base, se resta de la cantidad
+                            return sum + Number(fill.commission);
+                        }
+                        return sum;
+                    }, 0);
+
+                    if (totalCommissionInBase > 0) {
+                        netQuantity = netQuantity - totalCommissionInBase;
+                        this.logger.debug(`✅ Comisión en activo base detectada: ${totalCommissionInBase}`);
+                        this.logger.debug(`   Cantidad ejecutada: ${orderData.executedQty}`);
+                        this.logger.debug(`   Cantidad neta disponible: ${netQuantity}`);
+                    }
+                }
+
+                updateData.quantity = netQuantity;
+                this.logger.debug(`✅ Actualizando quantity del movimiento: ${netQuantity}`);
+            }
         } else if (orderData.status === 'CANCELED') {
             updateData.status = MovementStatus.CANCELLED;
         } else if (orderData.status === 'REJECTED') {
@@ -660,6 +694,7 @@ export class SignalDatabaseService {
         }
 
         this.logger.log(`📝 Movimiento ${movementId} actualizado con datos de Binance: OrderId=${orderData.binanceOrderId}, Status=${orderData.status}`);
+        this.logger.debug(`🔍 Verificación post-actualización: quantity en DB = ${updatedMovement.quantity}`);
 
         // Verificar si la señal debe cerrarse automáticamente
         await this.checkAndCloseSignal(updatedMovement.signalId);

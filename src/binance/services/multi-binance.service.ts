@@ -163,6 +163,10 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
         if (params.symbol === 'BTCUSDT') {
             const roundedQuantity = Math.max(0.00001, Math.floor(params.quantity / 0.00001) * 0.00001);
             formattedQuantity = roundedQuantity.toFixed(5);
+            this.logger.debug(`🔢 Formateo de cantidad ${params.side}:`);
+            this.logger.debug(`  Original: ${params.quantity}`);
+            this.logger.debug(`  Redondeada: ${roundedQuantity}`);
+            this.logger.debug(`  Formateada: ${formattedQuantity}`);
         } else {
             formattedQuantity = params.quantity.toFixed(8);
         }
@@ -329,20 +333,34 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
     }
 
     async getOrderStatus(symbol: string, orderId: number, userId: string): Promise<BinanceOrderResponse> {
+        const userClient = await this.getUserClient(userId);
+
+        if (!userClient) {
+            throw new Error(`Cliente no disponible para usuario ${userId}`);
+        }
+
         try {
-            const userClient = await this.getUserClient(userId);
-
-            if (!userClient) {
-                throw new Error(`Cliente no disponible para usuario ${userId}`);
-            }
-
             const response = await userClient.client.getOrder({
                 symbol,
                 orderId,
             });
             return response;
         } catch (error) {
-            this.logger.error(`Error consultando orden ${orderId}:`, error);
+            // Manejo específico del error de timestamp
+            if (error.code === -1021) {
+                this.logger.warn(`⚠️ [${userClient.user.email}] Error de timestamp al consultar orden, re-sincronizando...`);
+                await this.syncServerTime(userId);
+
+                // Reintentar después de sincronizar
+                const response = await userClient.client.getOrder({
+                    symbol,
+                    orderId,
+                });
+                this.logger.log(`✅ [${userClient.user.email}] Orden consultada después de re-sincronizar: ${orderId}`);
+                return response;
+            }
+
+            this.logger.error(`❌ [${userClient.user.email}] Error consultando orden ${orderId}:`, error);
             throw error;
         }
     }
@@ -352,6 +370,12 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
      */
     private async updateMovementWithBinanceData(movementId: string, binanceResponse: BinanceOrderResponse): Promise<void> {
         try {
+            this.logger.debug(`🔍 Respuesta completa de Binance para movimiento ${movementId}:`);
+            this.logger.debug(`   executedQty: ${binanceResponse.executedQty}`);
+            this.logger.debug(`   fills: ${JSON.stringify(binanceResponse.fills)}`);
+            this.logger.debug(`   status: ${binanceResponse.status}`);
+            this.logger.debug(`   symbol: ${binanceResponse.symbol}`);
+
             await this.signalDbService.updateMovementWithOrderData(movementId, {
                 binanceOrderId: binanceResponse.orderId,
                 clientOrderId: binanceResponse.clientOrderId,

@@ -71,7 +71,11 @@ export class MultiUserStrategyService implements OnModuleInit {
             };
 
             this.userConfigs.set(user.id, config);
-            this.logger.log(`✅ Configuración cargada para usuario ${user.email}: Capital=${config.capitalPerTrade}, MaxSignals=${config.maxActiveSignals}`);
+            this.logger.log(`✅ Configuración cargada para usuario ${user.email}:`);
+            this.logger.log(`   💰 Capital por trade: ${config.capitalPerTrade} USDT`);
+            this.logger.log(`   📊 Max señales activas: ${config.maxActiveSignals}`);
+            this.logger.log(`   🎯 Profit margin: ${config.profitMargin}%`);
+            this.logger.log(`   🛑 Stop loss margin: ${config.sellMargin}%`);
         }
     }
 
@@ -152,22 +156,41 @@ export class MultiUserStrategyService implements OnModuleInit {
 
                 // ✅ 1. Actualizar BUY pendientes
                 if (buyPendingMovement) {
-                    const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(buyPendingMovement.binanceOrderId), userId);
-                    console.log('orderStatus', orderStatus);
-                    if (orderStatus.status === 'FILLED') {
-                        await this.signalDbService.updateMovementStatus(buyPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
-                        this.logger.debug(`✅ [Usuario ${userId}] BUY completado para ${signal.symbol}`);
+                    try {
+                        const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(buyPendingMovement.binanceOrderId), userId);
+                        console.log('orderStatus', orderStatus);
+                        if (orderStatus.status === 'FILLED') {
+                            await this.signalDbService.updateMovementStatus(buyPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
+                            this.logger.debug(`✅ [Usuario ${userId}] BUY completado para ${signal.symbol}`);
+
+                            // 🎯 Crear orden de VENTA LIMIT automáticamente después de confirmar la compra
+                            const existingSellMovement = signal.movements.find(m =>
+                                m.type === MovementType.SELL &&
+                                (m.status === MovementStatus.PENDING || m.status === MovementStatus.FILLED)
+                            );
+
+                            if (!existingSellMovement) {
+                                this.logger.log(`📤 [Usuario ${userId}] Creando orden de venta LIMIT automática para señal ${signal.id}`);
+                                await this.createSellSignalForUser(userId, userConfig, candle, signal, techIndicators.atr);
+                            }
+                        }
+                    } catch (error) {
+                        this.logger.error(`❌ [Usuario ${userId}] Error actualizando estado de BUY ${buyPendingMovement.id}:`, error.message);
                     }
                 }
 
                 // ✅ 2. Actualizar SELL pendientes
                 if (sellPendingMovement) {
                     hasPendingSell = true;
-                    const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(sellPendingMovement.binanceOrderId), userId);
-                    if (orderStatus.status === 'FILLED') {
-                        await this.signalDbService.updateMovementStatus(sellPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
-                        await this.signalDbService.updateStatusSignal(signal.id, SignalStatus.MATCHED);
-                        this.logger.debug(`💰 [Usuario ${userId}] SELL completado para ${signal.symbol}`);
+                    try {
+                        const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(sellPendingMovement.binanceOrderId), userId);
+                        if (orderStatus.status === 'FILLED') {
+                            await this.signalDbService.updateMovementStatus(sellPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
+                            await this.signalDbService.updateStatusSignal(signal.id, SignalStatus.MATCHED);
+                            this.logger.debug(`💰 [Usuario ${userId}] SELL completado para ${signal.symbol}`);
+                        }
+                    } catch (error) {
+                        this.logger.error(`❌ [Usuario ${userId}] Error actualizando estado de SELL ${sellPendingMovement.id}:`, error.message);
                     }
                 }
                 // 🧠 Marcar la señal como "lista para vender" si tiene BUY FILLED y no tiene SELL pendiente/filled
@@ -248,18 +271,26 @@ export class MultiUserStrategyService implements OnModuleInit {
                 currentVolume
             });
         }
-        const signalsReadyToSell = activeSignals.filter(s => s["readyToSell"]);
-        this.logger.debug(`📊 [Usuario ${userId}] Señales listas para vender: ${signalsReadyToSell.length}`);
-        if (signalsReadyToSell.length > 0) {
-            this.logger.debug(`📈 [Usuario ${userId}] Tiene ${signalsReadyToSell.length} señales con BUY FILLED listas para vender.`);
-            await this.evaluateSellSignalsForUser(userId, userConfig, lastCandle, atr, signalsReadyToSell);
-        }
 
-        // 🔴 Evaluar ventas solo si NO hay una venta pendiente
-        if (!hasPendingSell) {
-            await this.evaluateSellSignalsForUser(userId, userConfig, lastCandle, atr, activeSignals);
-        } else {
-            this.logger.debug(`⏸️ [Usuario ${userId}] Tiene una venta pendiente, no se evaluarán nuevas señales SELL.`);
+        // 🔴 Las órdenes de venta se crean automáticamente después de la compra
+        // Esta sección se mantiene como respaldo por si hay que recrear órdenes
+        const signalsReadyToSell = activeSignals.filter(s => s["readyToSell"]);
+        this.logger.debug(`📊 [Usuario ${userId}] Señales con BUY FILLED: ${signalsReadyToSell.length}`);
+
+        // Solo intentar crear ventas si no hay ninguna venta pendiente y hay señales sin orden de venta
+        if (!hasPendingSell && signalsReadyToSell.length > 0) {
+            // Verificar si alguna señal no tiene orden de venta creada
+            const signalsWithoutSellOrder = signalsReadyToSell.filter(signal =>
+                !signal.movements.some(m => m.type === MovementType.SELL &&
+                    (m.status === MovementStatus.PENDING || m.status === MovementStatus.FILLED))
+            );
+
+            if (signalsWithoutSellOrder.length > 0) {
+                this.logger.warn(`⚠️ [Usuario ${userId}] Detectadas ${signalsWithoutSellOrder.length} señales sin orden de venta, creando...`);
+                await this.evaluateSellSignalsForUser(userId, userConfig, lastCandle, atr, signalsWithoutSellOrder);
+            }
+        } else if (hasPendingSell) {
+            this.logger.debug(`⏸️ [Usuario ${userId}] Tiene una venta pendiente, esperando ejecución.`);
         }
     }
 
@@ -319,21 +350,34 @@ export class MultiUserStrategyService implements OnModuleInit {
         atr: number,
         activeSignals: Signal[]
     ) {
-        // Verificar señales de compra para vender (específicas del usuario)
+        // Esta función se usa como respaldo para crear órdenes de venta LIMIT
+        // Las órdenes normalmente se crean automáticamente después de confirmar la compra
         const buySignals = activeSignals.filter(signal =>
             signal.movements.some(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED) &&
-            !signal.movements.some(m => m.type === MovementType.SELL && m.status === MovementStatus.FILLED)
+            !signal.movements.some(m => m.type === MovementType.SELL)
         );
 
         if (buySignals.length === 0) {
             return;
         }
 
-        this.logger.debug(`🔍 [Usuario ${userId}] Evaluando señales de VENTA para ${buySignals.length} posición(es) activa(s)`);
+        this.logger.debug(`🔍 [Usuario ${userId}] Creando órdenes de venta LIMIT para ${buySignals.length} señal(es)`);
 
         for (const signal of buySignals) {
             const buyMovement = signal.movements.find(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
             if (!buyMovement) continue;
+
+            const takeProfit = Number(signal.takeProfit);
+            const stopLoss = Number(signal.stopLoss);
+            const initialPrice = Number(signal.initialPrice);
+
+            // Validar que los valores sean números válidos
+            if (isNaN(takeProfit) || isNaN(stopLoss) || isNaN(initialPrice)) {
+                this.logger.error(`❌ [Usuario ${userId}] Valores inválidos en señal ${signal.id}`);
+                continue;
+            }
+
+            this.logger.log(`📤 [Usuario ${userId}] Creando orden SELL LIMIT para señal ${signal.id} al precio ${takeProfit.toFixed(2)}`);
             await this.createSellSignalForUser(userId, userConfig, candle, signal, atr);
         }
     }
@@ -349,11 +393,35 @@ export class MultiUserStrategyService implements OnModuleInit {
         macd: number,
         volume: number
     ) {
-        const stopLossPercent = (1.5 * atr) / candle.close;
-        const takeProfitPercent = (3 * atr) / candle.close;
+        // Usar los márgenes configurados por el usuario (en porcentaje)
+        const takeProfitPercent = userConfig.profitMargin / 100; // ej: 3 -> 0.03 (3%)
+        const stopLossPercent = userConfig.sellMargin / 100; // ej: 3 -> 0.03 (3%)
 
         const stopLoss = candle.close * (1 - stopLossPercent);
         const takeProfit = candle.close * (1 + takeProfitPercent);
+
+        this.logger.log(`🎯 [Usuario ${userId}] Cálculo de niveles de salida:`);
+        this.logger.log(`   📊 Precio de compra: ${candle.close.toFixed(2)} USDT`);
+        this.logger.log(`   📊 ATR: ${atr.toFixed(2)}`);
+
+        if (stopLossPercent > 0) {
+            this.logger.log(`   🛑 Stop Loss: ${stopLoss.toFixed(2)} USDT (${(stopLossPercent * 100).toFixed(2)}% abajo)`);
+            this.logger.log(`   💰 Riesgo: ${((candle.close - stopLoss) / candle.close * 100).toFixed(2)}%`);
+            this.logger.log(`   ⚖️ Ratio Riesgo/Recompensa: 1:${(takeProfitPercent / stopLossPercent).toFixed(2)}`);
+        } else {
+            this.logger.log(`   🛑 Stop Loss: DESACTIVADO (sin límite de pérdida)`);
+            this.logger.log(`   ⚠️ ADVERTENCIA: Sin stop loss, las pérdidas pueden ser ilimitadas`);
+        }
+
+        this.logger.log(`   🎯 Take Profit: ${takeProfit.toFixed(2)} USDT (${(takeProfitPercent * 100).toFixed(2)}% arriba)`);
+        this.logger.log(`   💰 Ganancia esperada: ${((takeProfit - candle.close) / candle.close * 100).toFixed(2)}%`);
+
+        // Advertencia si la ganancia esperada es menor que las comisiones
+        const expectedProfitPercent = (takeProfitPercent * 100);
+        const totalCommissionPercent = this.COMMISSION * 2 * 100; // Compra + Venta
+        if (expectedProfitPercent < totalCommissionPercent) {
+            this.logger.warn(`⚠️ ADVERTENCIA: Ganancia esperada (${expectedProfitPercent.toFixed(3)}%) es MENOR que las comisiones totales (${totalCommissionPercent}%)`);
+        }
 
         // Usar el capital personalizado del usuario
         const rawPositionSize = userConfig.capitalPerTrade / candle.close;
@@ -425,21 +493,75 @@ export class MultiUserStrategyService implements OnModuleInit {
         const buyMovement = signal.movements.find(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
         if (!buyMovement) return;
 
-        // Cantidad comprada bruta
-        const buyQuantity = Number(buyMovement.quantity);
+        // ✅ IMPORTANTE: Verificar si ya existe una orden de venta para esta señal
+        const existingSellMovement = signal.movements.find(m =>
+            m.type === MovementType.SELL &&
+            (m.status === MovementStatus.PENDING || m.status === MovementStatus.FILLED)
+        );
 
-        const netQuantity = buyQuantity * (1 - this.COMMISSION); // 👈 se descuenta la comisión real
+        if (existingSellMovement) {
+            this.logger.debug(`⏸️ [Usuario ${userId}] Ya existe orden de venta para señal ${signal.id}: ${existingSellMovement.id} (${existingSellMovement.status})`);
+            return;
+        }
+
         const sellPrice = signal.takeProfit;
+
+        this.logger.debug(`🔍 [Usuario ${userId}] DEBUG VENTA - Movimiento: ${buyMovement.id}`);
+        this.logger.debug(`  📊 Cantidad en DB: ${buyMovement.quantity}`);
+        this.logger.debug(`  📊 binanceResponse: ${JSON.stringify(buyMovement.binanceResponse)}`);
+
+        // Calcular cantidad neta disponible real, descontando comisión si fue en BTC
+        let sellQuantity = Number(buyMovement.quantity);
+
+        if (buyMovement.binanceResponse?.fills && Array.isArray(buyMovement.binanceResponse.fills)) {
+            const executedQty = Number(buyMovement.binanceResponse.executedQty || buyMovement.quantity);
+            const fills = buyMovement.binanceResponse.fills;
+
+            // Calcular comisión total cobrada en BTC (activo base)
+            const symbol = buyMovement.binanceResponse.symbol || process.env.BINANCE_SYMBOL || 'BTCUSDT';
+            const baseAsset = symbol.replace('USDT', '').replace('BUSD', ''); // BTC
+
+            const totalCommissionInBTC = fills.reduce((sum, fill) => {
+                if (fill.commissionAsset === baseAsset) {
+                    return sum + Number(fill.commission);
+                }
+                return sum;
+            }, 0);
+
+            if (totalCommissionInBTC > 0) {
+                sellQuantity = executedQty - totalCommissionInBTC;
+                this.logger.debug(`  ✅ Calculando cantidad neta:`);
+                this.logger.debug(`     - executedQty: ${executedQty}`);
+                this.logger.debug(`     - Comisión en ${baseAsset}: ${totalCommissionInBTC}`);
+                this.logger.debug(`     - Cantidad neta disponible: ${sellQuantity}`);
+            } else {
+                this.logger.debug(`  ℹ️ Comisión no cobrada en ${baseAsset}, usando cantidad completa`);
+            }
+        } else {
+            this.logger.warn(`  ⚠️ No hay fills disponibles en binanceResponse, usando quantity de DB`);
+        }
+
+        this.logger.debug(`  💰 Cantidad final a vender: ${sellQuantity}`);
+        this.logger.debug(`  💰 Precio de venta: ${sellPrice}`);
+
+        // Calcular valores para el movimiento de venta
+        const totalAmount = sellPrice * sellQuantity;
+        const commission = totalAmount * this.COMMISSION;
+        const netAmount = totalAmount - commission;
+
+        this.logger.debug(`  💰 Total venta: ${totalAmount}`);
+        this.logger.debug(`  💰 Comisión estimada: ${commission}`);
+        this.logger.debug(`  💰 Neto estimado: ${netAmount}`);
 
         // Crear movimiento de venta
         const sellMovement = await this.signalDbService.createMovement({
             signalId: signal.id,
             type: MovementType.SELL,
             price: sellPrice,
-            quantity: netQuantity,
-            totalAmount: sellPrice * buyQuantity,
-            commission: sellPrice * buyQuantity * this.COMMISSION,
-            netAmount: sellPrice * buyQuantity - sellPrice * buyQuantity * this.COMMISSION
+            quantity: sellQuantity,
+            totalAmount,
+            commission,
+            netAmount
         });
 
         // Ejecutar orden si no es paper trading
@@ -449,7 +571,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                     symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
                     side: 'SELL',
                     type: 'LIMIT',
-                    quantity: netQuantity,
+                    quantity: sellQuantity,
                     price: sellPrice,
                     timeInForce: 'GTC'
                 }, sellMovement.id); // Pasar el ID del movimiento para actualizar con datos de Binance
@@ -467,7 +589,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.log(`🔴 [Usuario ${userId}] SEÑAL DE VENTA creada para señal ${signal.id}`);
 
         // Emitir evento
-        this.emitTradeSignalForUser(userId, 'sell', candle.close, atr, signal.id, netQuantity);
+        this.emitTradeSignalForUser(userId, 'sell', candle.close, atr, signal.id, sellQuantity);
     }
 
     private emitTradeSignalForUser(userId: string, side: 'buy' | 'sell', price: number, atr: number, signalId: string, netQuantity?: number) {
@@ -591,5 +713,34 @@ export class MultiUserStrategyService implements OnModuleInit {
     async removeUser(userId: string): Promise<void> {
         this.userConfigs.delete(userId);
         this.logger.log(`🗑️ Configuración removida para usuario ${userId}`);
+    }
+
+    // Método para recargar configuración de un usuario (útil si se actualiza en BD)
+    async reloadUserConfig(userId: string): Promise<void> {
+        const user = await this.userRepository.findOne({
+            where: { id: userId, isActive: true }
+        });
+
+        if (!user) {
+            throw new Error(`Usuario ${userId} no encontrado o inactivo`);
+        }
+
+        const config: UserStrategyConfig = {
+            userId: user.id,
+            capitalForSignals: Number(user.capitalForSignals),
+            capitalPerTrade: Number(user.capitalPerTrade),
+            profitMargin: Number(user.profitMargin),
+            sellMargin: Number(user.sellMargin),
+            maxActiveSignals: user.maxActiveSignals,
+            dailySignalCount: this.userConfigs.get(userId)?.dailySignalCount || 0,
+            lastResetDate: this.userConfigs.get(userId)?.lastResetDate || new Date().toDateString()
+        };
+
+        this.userConfigs.set(userId, config);
+        this.logger.log(`🔄 Configuración recargada para usuario ${user.email}:`);
+        this.logger.log(`   💰 Capital por trade: ${config.capitalPerTrade} USDT`);
+        this.logger.log(`   📊 Max señales activas: ${config.maxActiveSignals}`);
+        this.logger.log(`   🎯 Profit margin: ${config.profitMargin}%`);
+        this.logger.log(`   🛑 Stop loss margin: ${config.sellMargin}%`);
     }
 }
