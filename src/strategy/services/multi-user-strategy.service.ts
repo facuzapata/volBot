@@ -90,48 +90,50 @@ export class MultiUserStrategyService implements OnModuleInit {
         try {
             const startupTime = new Date();
             const tradingMode = this.PAPER_TRADING ? 'PAPER TRADING' : 'TRADING REAL';
-            const activeConfigs = Array.from(this.userConfigs.values());
+            const startupDateTime = startupTime.toLocaleString('es-AR', {
+                timeZone: 'America/Argentina/Buenos_Aires',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
 
-            const lines: string[] = [
-                '🤖 <b>Tu bot esta iniciado</b>',
-                `⏰ <b>Hora:</b> ${startupTime.toLocaleString('es-AR', {
-                    timeZone: 'America/Argentina/Buenos_Aires',
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                })}`,
-                `📌 <b>Modo:</b> ${tradingMode}`,
-                `👥 <b>Usuarios activos:</b> ${activeConfigs.length}`,
-                ''
-            ];
+            // Enviar notificación a CADA usuario
+            for (const [userId, config] of this.userConfigs.entries()) {
+                const userMessage = [
+                    '🤖 <b>Tu bot esta iniciado</b>',
+                    `⏰ <b>Hora:</b> ${startupDateTime}`,
+                    `📌 <b>Modo:</b> ${tradingMode}`,
+                    '',
+                    `👤 <b>Usuario:</b> ${config.userEmail}`,
+                    `💰 Capital total: ${config.capitalForSignals} USDT`,
+                    `💸 Capital por trade: ${config.capitalPerTrade} USDT`,
+                    `📊 Max señales activas: ${config.maxActiveSignals}`,
+                    `🎯 Profit margin: ${(config.profitMargin * 100).toFixed(2)}%`,
+                    `🛑 Stop loss margin: ${(config.sellMargin * 100).toFixed(2)}%`,
+                    '',
+                    '✅ El sistema está monitoreando BTC/USDT en 1m'
+                ].join('\n');
 
-            for (const config of activeConfigs) {
-                const userLabel = config.userEmail || config.userId;
+                const whatsappMessage = userMessage
+                    .replace(/<b>/g, '*')
+                    .replace(/<\/b>/g, '*');
 
-                lines.push(`👤 <b>Usuario:</b> ${userLabel}`);
-                lines.push(`💰 Capital por trade: ${config.capitalPerTrade} USDT`);
-                lines.push(`📊 Max señales activas: ${config.maxActiveSignals}`);
-                lines.push(`🎯 Profit margin: ${config.profitMargin}%`);
-                lines.push(`🛑 Stop loss margin: ${config.sellMargin}%`);
-                lines.push('');
+                try {
+                    await Promise.allSettled([
+                        this.telegramService.sendSystemNotificationToUser(userId, userMessage),
+                        this.whatsappService.sendSystemNotificationToUser(userId, whatsappMessage)
+                    ]);
+                } catch (error) {
+                    this.logger.warn(`⚠️ Error enviando startup notification a usuario ${config.userEmail}:`, error);
+                }
             }
 
-            const telegramMessage = lines.join('\n').trim();
-            const whatsappMessage = telegramMessage
-                .replace(/<b>/g, '*')
-                .replace(/<\/b>/g, '*');
-
-            await Promise.allSettled([
-                this.telegramService.sendSystemNotification(telegramMessage),
-                this.whatsappService.sendSystemNotification(whatsappMessage)
-            ]);
-
-            this.logger.log('📲 Notificación de inicio enviada por Telegram/WhatsApp');
+            this.logger.log('📲 Notificaciones de inicio enviadas a todos los usuarios');
         } catch (error) {
-            this.logger.error('❌ Error enviando notificación de inicio:', this.getErrorMessage(error));
+            this.logger.error('❌ Error en sendStartupNotification:', this.getErrorMessage(error));
         }
     }
 
@@ -780,8 +782,8 @@ export class MultiUserStrategyService implements OnModuleInit {
             .replace(/<\/b>/g, '*');
 
         await Promise.allSettled([
-            this.telegramService.sendSystemNotification(telegramMessage),
-            this.whatsappService.sendSystemNotification(whatsappMessage)
+            this.telegramService.sendSystemNotificationToUser(payload.userId, telegramMessage),
+            this.whatsappService.sendSystemNotificationToUser(payload.userId, whatsappMessage)
         ]);
 
         this.logger.log(`📲 [Usuario ${payload.userId}] Notificación de orden ${payload.side} enviada`);

@@ -30,6 +30,19 @@ export class User {
     @Column('decimal', { precision: 5, scale: 2, default: 20 })
     capitalPerTrade: number;
 
+    // 📱 Canales de notificación
+    @Column({ nullable: true })
+    telegramChatId: string;
+
+    @Column({ nullable: true })
+    whatsappNumber: string;
+
+    @Column('boolean', { default: true })
+    telegramEnabled: boolean;
+
+    @Column('boolean', { default: true })
+    whatsappEnabled: boolean;
+
     @OneToMany(() => UserCredentials, credentials => credentials.user)
     credentials: UserCredentials[];
 

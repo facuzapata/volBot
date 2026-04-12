@@ -6,7 +6,7 @@ import Binance from 'binance-api-node';
 import { User } from '../../users/entities/user.entity';
 import { UserCredentials } from '../../users/entities/user-credentials.entity';
 import { CreateOrderParams } from '../interfaces/create-order-params';
-import { BinanceOrderResponse } from './binance.service';
+import { BinanceOrderResponse } from '../interfaces/binance-order-response.interface';
 import { SignalDatabaseService } from '../../strategy/services/signal-database.service';
 
 interface UserBinanceClient {
