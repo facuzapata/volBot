@@ -3,7 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Signal, SignalStatus } from '../entities/signal.entity';
 import { Movement, MovementType, MovementStatus } from '../entities/movement.entity';
-import { WhatsAppService, TradeReport } from '../../notifications/whatsapp.service';
+import { WhatsAppService } from '../../notifications/whatsapp.service';
+import { TelegramService } from '../../notifications/telegram.service';
+import { TradeReport } from '../../notifications/interfaces/trade-report.interface';
+import { PositionOpenReport } from '../../notifications/interfaces/position-open-report.interface';
 
 @Injectable()
 export class SignalDatabaseService {
@@ -14,7 +17,8 @@ export class SignalDatabaseService {
         private signalRepository: Repository<Signal>,
         @InjectRepository(Movement)
         private movementRepository: Repository<Movement>,
-        private readonly whatsappService: WhatsAppService
+        private readonly whatsappService: WhatsAppService,
+        private readonly telegramService: TelegramService
     ) { }
 
     async createSignal(signalData: {
@@ -148,6 +152,10 @@ export class SignalDatabaseService {
 
         // Verificar si la señal debe cerrarse cuando el movimiento se marca como FILLED
         if (status === MovementStatus.FILLED) {
+            if (movement.type === MovementType.BUY) {
+                await this.sendOpenPositionReport(movement);
+            }
+
             this.logger.log(`🔍 Movimiento marcado como FILLED, verificando cierre de señal ${movement.signalId}...`);
             await this.checkAndCloseSignal(movement.signalId);
         }
@@ -186,6 +194,38 @@ export class SignalDatabaseService {
             this.logger.debug(`⏳ Señal ${signalId} aún no lista para cerrar:`);
             this.logger.debug(`  - Faltan compras FILLED: ${buyMovements.length === 0 ? 'SÍ' : 'NO'}`);
             this.logger.debug(`  - Faltan ventas FILLED: ${sellMovements.length === 0 ? 'SÍ' : 'NO'}`);
+        }
+    }
+
+    private async sendOpenPositionReport(movement: Movement): Promise<void> {
+        try {
+            if (!movement.signal) {
+                this.logger.warn(`⚠️ No se pudo enviar reporte de apertura: señal no cargada para movimiento ${movement.id}`);
+                return;
+            }
+
+            const report: PositionOpenReport = {
+                signalId: movement.signalId,
+                symbol: movement.signal.symbol,
+                entryPrice: Number(movement.price),
+                quantity: Number(movement.quantity),
+                totalAmount: Number(movement.totalAmount),
+                commission: Number(movement.commission),
+                netAmount: Number(movement.netAmount),
+                stopLoss: Number(movement.signal.stopLoss),
+                takeProfit: Number(movement.signal.takeProfit),
+                paperTrading: movement.signal.paperTrading,
+                openedAt: movement.executedAt || new Date()
+            };
+
+            await Promise.allSettled([
+                this.whatsappService.sendPositionOpenReport(report),
+                this.telegramService.sendPositionOpenReport(report)
+            ]);
+
+            this.logger.log(`📲 Reportes de apertura enviados (WhatsApp/Telegram) para señal ${movement.signalId}`);
+        } catch (error) {
+            this.logger.error(`❌ Error enviando reportes de apertura:`, error);
         }
     }
 
@@ -353,11 +393,15 @@ export class SignalDatabaseService {
                 paperTrading: signal.paperTrading
             };
 
-            await this.whatsappService.sendTradeReport(report);
-            this.logger.log(`📱 Reporte de WhatsApp enviado para señal ${signalId}`);
+            await Promise.allSettled([
+                this.whatsappService.sendTradeReport(report),
+                this.telegramService.sendTradeReport(report)
+            ]);
+
+            this.logger.log(`📲 Reportes de cierre enviados (WhatsApp/Telegram) para señal ${signalId}`);
 
         } catch (error) {
-            this.logger.error(`❌ Error enviando reporte de WhatsApp:`, error);
+            this.logger.error(`❌ Error enviando reportes de cierre:`, error);
         }
     }
 

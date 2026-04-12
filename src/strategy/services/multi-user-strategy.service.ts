@@ -9,10 +9,13 @@ import { CandleCacheService } from './candle-cache.service';
 import { TradeSignal } from '../interfaces/traide-signal.interface';
 import { Signal, SignalStatus } from '../entities/signal.entity';
 import { MovementType, MovementStatus } from '../entities/movement.entity';
+import { TelegramService } from '../../notifications/telegram.service';
+import { WhatsAppService } from '../../notifications/whatsapp.service';
 import * as indicators from '../../utils/indicators';
 
 interface UserStrategyConfig {
     userId: string;
+    userEmail: string;
     capitalForSignals: number;
     capitalPerTrade: number;
     profitMargin: number;
@@ -39,6 +42,8 @@ export class MultiUserStrategyService implements OnModuleInit {
         private readonly signalDbService: SignalDatabaseService,
         private readonly candleCacheService: CandleCacheService,
         private readonly multiBinanceService: MultiBinanceService,
+        private readonly telegramService: TelegramService,
+        private readonly whatsappService: WhatsAppService,
         @InjectRepository(User)
         private userRepository: Repository<User>
     ) {
@@ -49,6 +54,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         const tradingMode = this.PAPER_TRADING ? 'PAPER TRADING' : 'TRADING REAL';
         this.logger.log(`🚀 Estrategia multi-usuario inicializada - Modo: ${tradingMode}`);
         await this.loadActiveUsers();
+        await this.sendStartupNotification();
     }
 
     private async loadActiveUsers() {
@@ -61,6 +67,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         for (const user of activeUsers) {
             const config: UserStrategyConfig = {
                 userId: user.id,
+                userEmail: user.email,
                 capitalForSignals: Number(user.capitalForSignals),
                 capitalPerTrade: Number(user.capitalPerTrade),
                 profitMargin: Number(user.profitMargin),
@@ -76,6 +83,55 @@ export class MultiUserStrategyService implements OnModuleInit {
             this.logger.log(`   📊 Max señales activas: ${config.maxActiveSignals}`);
             this.logger.log(`   🎯 Profit margin: ${config.profitMargin}%`);
             this.logger.log(`   🛑 Stop loss margin: ${config.sellMargin}%`);
+        }
+    }
+
+    private async sendStartupNotification(): Promise<void> {
+        try {
+            const startupTime = new Date();
+            const tradingMode = this.PAPER_TRADING ? 'PAPER TRADING' : 'TRADING REAL';
+            const activeConfigs = Array.from(this.userConfigs.values());
+
+            const lines: string[] = [
+                '🤖 <b>Tu bot esta iniciado</b>',
+                `⏰ <b>Hora:</b> ${startupTime.toLocaleString('es-AR', {
+                    timeZone: 'America/Argentina/Buenos_Aires',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                })}`,
+                `📌 <b>Modo:</b> ${tradingMode}`,
+                `👥 <b>Usuarios activos:</b> ${activeConfigs.length}`,
+                ''
+            ];
+
+            for (const config of activeConfigs) {
+                const userLabel = config.userEmail || config.userId;
+
+                lines.push(`👤 <b>Usuario:</b> ${userLabel}`);
+                lines.push(`💰 Capital por trade: ${config.capitalPerTrade} USDT`);
+                lines.push(`📊 Max señales activas: ${config.maxActiveSignals}`);
+                lines.push(`🎯 Profit margin: ${config.profitMargin}%`);
+                lines.push(`🛑 Stop loss margin: ${config.sellMargin}%`);
+                lines.push('');
+            }
+
+            const telegramMessage = lines.join('\n').trim();
+            const whatsappMessage = telegramMessage
+                .replace(/<b>/g, '*')
+                .replace(/<\/b>/g, '*');
+
+            await Promise.allSettled([
+                this.telegramService.sendSystemNotification(telegramMessage),
+                this.whatsappService.sendSystemNotification(whatsappMessage)
+            ]);
+
+            this.logger.log('📲 Notificación de inicio enviada por Telegram/WhatsApp');
+        } catch (error) {
+            this.logger.error('❌ Error enviando notificación de inicio:', this.getErrorMessage(error));
         }
     }
 
@@ -175,7 +231,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                             }
                         }
                     } catch (error) {
-                        this.logger.error(`❌ [Usuario ${userId}] Error actualizando estado de BUY ${buyPendingMovement.id}:`, error.message);
+                        this.logger.error(`❌ [Usuario ${userId}] Error actualizando estado de BUY ${buyPendingMovement.id}:`, this.getErrorMessage(error));
                     }
                 }
 
@@ -190,7 +246,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                             this.logger.debug(`💰 [Usuario ${userId}] SELL completado para ${signal.symbol}`);
                         }
                     } catch (error) {
-                        this.logger.error(`❌ [Usuario ${userId}] Error actualizando estado de SELL ${sellPendingMovement.id}:`, error.message);
+                        this.logger.error(`❌ [Usuario ${userId}] Error actualizando estado de SELL ${sellPendingMovement.id}:`, this.getErrorMessage(error));
                     }
                 }
                 // 🧠 Marcar la señal como "lista para vender" si tiene BUY FILLED y no tiene SELL pendiente/filled
@@ -277,8 +333,8 @@ export class MultiUserStrategyService implements OnModuleInit {
         const signalsReadyToSell = activeSignals.filter(s => s["readyToSell"]);
         this.logger.debug(`📊 [Usuario ${userId}] Señales con BUY FILLED: ${signalsReadyToSell.length}`);
 
-        // Solo intentar crear ventas si no hay ninguna venta pendiente y hay señales sin orden de venta
-        if (!hasPendingSell && signalsReadyToSell.length > 0) {
+        // Verificar si hay señales sin orden de venta y crearlas
+        if (signalsReadyToSell.length > 0) {
             // Verificar si alguna señal no tiene orden de venta creada
             const signalsWithoutSellOrder = signalsReadyToSell.filter(signal =>
                 !signal.movements.some(m => m.type === MovementType.SELL &&
@@ -289,8 +345,6 @@ export class MultiUserStrategyService implements OnModuleInit {
                 this.logger.warn(`⚠️ [Usuario ${userId}] Detectadas ${signalsWithoutSellOrder.length} señales sin orden de venta, creando...`);
                 await this.evaluateSellSignalsForUser(userId, userConfig, lastCandle, atr, signalsWithoutSellOrder);
             }
-        } else if (hasPendingSell) {
-            this.logger.debug(`⏸️ [Usuario ${userId}] Tiene una venta pendiente, esperando ejecución.`);
         }
     }
 
@@ -457,6 +511,23 @@ export class MultiUserStrategyService implements OnModuleInit {
             netAmount
         });
 
+        await this.notifyOrderCreated({
+            userId,
+            userConfig,
+            side: 'BUY',
+            orderType: 'MARKET',
+            signalId: signal.id,
+            symbol: signal.symbol,
+            price: candle.close,
+            quantity: positionSize,
+            totalAmount,
+            commission,
+            stopLoss,
+            takeProfit,
+            movementStatus: movement.status,
+            paperTrading: this.PAPER_TRADING
+        });
+
         // Ejecutar orden si no es paper trading
         if (!this.PAPER_TRADING) {
             try {
@@ -564,6 +635,23 @@ export class MultiUserStrategyService implements OnModuleInit {
             netAmount
         });
 
+        await this.notifyOrderCreated({
+            userId,
+            userConfig: userStrategyConfig,
+            side: 'SELL',
+            orderType: 'LIMIT',
+            signalId: signal.id,
+            symbol: signal.symbol,
+            price: Number(sellPrice),
+            quantity: sellQuantity,
+            totalAmount,
+            commission,
+            stopLoss: Number(signal.stopLoss),
+            takeProfit: Number(signal.takeProfit),
+            movementStatus: sellMovement.status,
+            paperTrading: this.PAPER_TRADING
+        });
+
         // Ejecutar orden si no es paper trading
         if (!this.PAPER_TRADING) {
             try {
@@ -637,6 +725,68 @@ export class MultiUserStrategyService implements OnModuleInit {
         }
     }
 
+    private async notifyOrderCreated(payload: {
+        userId: string;
+        userConfig: UserStrategyConfig;
+        side: 'BUY' | 'SELL';
+        orderType: 'MARKET' | 'LIMIT';
+        signalId: string;
+        symbol: string;
+        price: number;
+        quantity: number;
+        totalAmount: number;
+        commission: number;
+        stopLoss: number;
+        takeProfit: number;
+        movementStatus: MovementStatus;
+        paperTrading: boolean;
+    }): Promise<void> {
+        const mode = payload.paperTrading ? 'PAPER TRADING' : 'TRADING REAL';
+        const sideLabel = payload.side === 'BUY' ? 'COMPRA' : 'VENTA';
+        const sideEmoji = payload.side === 'BUY' ? '🟢' : '🔴';
+        const asset = payload.symbol.replace('USDT', '');
+        const timeText = new Date().toLocaleString('es-AR', {
+            timeZone: 'America/Argentina/Buenos_Aires',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        const telegramMessage = [
+            `🧾 <b>Orden ${sideLabel} Generada</b>`,
+            '',
+            `👤 <b>Usuario:</b> ${payload.userConfig.userEmail || payload.userId}`,
+            `📌 <b>Modo:</b> ${mode}`,
+            `📈 <b>Par:</b> ${payload.symbol}`,
+            `⚙️ <b>Tipo:</b> ${payload.orderType}`,
+            `📊 <b>Estado:</b> ${payload.movementStatus}`,
+            '',
+            `${sideEmoji} <b>Precio:</b> $${payload.price.toFixed(2)} USDT`,
+            `📦 <b>Cantidad:</b> ${payload.quantity.toFixed(6)} ${asset}`,
+            `💵 <b>Monto:</b> $${payload.totalAmount.toFixed(2)} USDT`,
+            `💸 <b>Comisión est.:</b> $${payload.commission.toFixed(4)} USDT`,
+            `🛑 <b>Stop Loss:</b> $${payload.stopLoss.toFixed(2)} USDT`,
+            `🎯 <b>Take Profit:</b> $${payload.takeProfit.toFixed(2)} USDT`,
+            `🔗 <b>ID:</b> ${payload.signalId.substring(0, 8)}...`,
+            '',
+            `🕒 ${timeText}`
+        ].join('\n');
+
+        const whatsappMessage = telegramMessage
+            .replace(/<b>/g, '*')
+            .replace(/<\/b>/g, '*');
+
+        await Promise.allSettled([
+            this.telegramService.sendSystemNotification(telegramMessage),
+            this.whatsappService.sendSystemNotification(whatsappMessage)
+        ]);
+
+        this.logger.log(`📲 [Usuario ${payload.userId}] Notificación de orden ${payload.side} enviada`);
+    }
+
     private calculateTechnicalIndicators(closes: number[], highs: number[], lows: number[], volumes: number[], candles: indicators.Candle[]) {
         // Misma lógica que el servicio original, pero calculado una vez para todos los usuarios
         const smaShort = indicators.calculateSMA(closes, 9);
@@ -696,6 +846,7 @@ export class MultiUserStrategyService implements OnModuleInit {
 
         const config: UserStrategyConfig = {
             userId: user.id,
+            userEmail: user.email,
             capitalForSignals: Number(user.capitalForSignals),
             capitalPerTrade: Number(user.capitalPerTrade),
             profitMargin: Number(user.profitMargin),
@@ -727,6 +878,7 @@ export class MultiUserStrategyService implements OnModuleInit {
 
         const config: UserStrategyConfig = {
             userId: user.id,
+            userEmail: user.email,
             capitalForSignals: Number(user.capitalForSignals),
             capitalPerTrade: Number(user.capitalPerTrade),
             profitMargin: Number(user.profitMargin),
@@ -742,5 +894,9 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.log(`   📊 Max señales activas: ${config.maxActiveSignals}`);
         this.logger.log(`   🎯 Profit margin: ${config.profitMargin}%`);
         this.logger.log(`   🛑 Stop loss margin: ${config.sellMargin}%`);
+    }
+
+    private getErrorMessage(error: unknown): string {
+        return error instanceof Error ? error.message : String(error);
     }
 }

@@ -1,28 +1,13 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
-
-export interface TradeReport {
-    signalId: string;
-    symbol: string;
-    buyPrice: number;
-    sellPrice: number;
-    quantity: number;
-    totalBuyAmount: number;
-    totalSellAmount: number;
-    grossProfit: number;
-    totalCommission: number;
-    netProfit: number;
-    profitPercent: number;
-    roi: number;
-    duration: string;
-    paperTrading: boolean;
-}
+import { TradeReport } from './interfaces/trade-report.interface';
+import { PositionOpenReport } from './interfaces/position-open-report.interface';
 
 @Injectable()
 export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(WhatsAppService.name);
-    private client: Client;
+    private client!: Client;
     private isReady = false;
     private readonly WHATSAPP_ENABLED: boolean;
     private readonly WHATSAPP_NUMBER: string;
@@ -114,12 +99,26 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
                 await this.client.destroy();
                 this.logger.log('📱 WhatsApp Web desconectado correctamente');
             } catch (error) {
-                this.logger.error('❌ Error al desconectar WhatsApp:', error.message);
+                this.logger.error('❌ Error al desconectar WhatsApp:', this.getErrorMessage(error));
             }
         }
     }
 
     async sendTradeReport(report: TradeReport): Promise<void> {
+        const message = this.formatTradeMessage(report);
+        await this.sendMessage(message, 'Reporte de trading enviado por WhatsApp');
+    }
+
+    async sendPositionOpenReport(report: PositionOpenReport): Promise<void> {
+        const message = this.formatOpenPositionMessage(report);
+        await this.sendMessage(message, 'Reporte de apertura enviado por WhatsApp');
+    }
+
+    async sendSystemNotification(message: string): Promise<void> {
+        await this.sendMessage(message, 'Notificación de sistema enviada por WhatsApp');
+    }
+
+    private async sendMessage(message: string, successLog: string): Promise<void> {
         if (!this.WHATSAPP_ENABLED) {
             this.logger.debug('📱 WhatsApp deshabilitado - no se envía reporte');
             return;
@@ -149,11 +148,10 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
                 chatId = `${chatId}@c.us`;
             }
 
-            const message = this.formatTradeMessage(report);
             await this.client.sendMessage(chatId, message);
-            this.logger.log(`📱 Reporte de trading enviado por WhatsApp a ${chatId}`);
+            this.logger.log(`📱 ${successLog} a ${chatId}`);
         } catch (error) {
-            this.logger.error('❌ Error enviando mensaje de WhatsApp:', error.message);
+            this.logger.error('❌ Error enviando mensaje de WhatsApp:', this.getErrorMessage(error));
         }
     }
 
@@ -188,6 +186,39 @@ ${profitEmoji} *${profitText}: $${Math.abs(report.netProfit).toFixed(4)} USDT*
 
 ━━━━━━━━━━━━━━━━━━━━
 ${new Date().toLocaleString('es-ES', {
+            timeZone: 'America/Argentina/Buenos_Aires',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        })}`;
+    }
+
+    private formatOpenPositionMessage(report: PositionOpenReport): string {
+        const mode = report.paperTrading ? '📝 PAPER TRADING' : '💰 TRADING REAL';
+
+        return `🚀 *VolBot - Operación Abierta*
+
+${mode}
+
+📈 *${report.symbol}* - Compra Ejecutada
+━━━━━━━━━━━━━━━━━━━━
+
+📥 *ENTRADA*
+🟢 Precio de compra: $${report.entryPrice.toFixed(2)} USDT
+📊 Cantidad: ${report.quantity.toFixed(6)} ${report.symbol.replace('USDT', '')}
+💵 Inversión: $${report.totalAmount.toFixed(2)} USDT
+💸 Comisión: $${report.commission.toFixed(4)} USDT
+🧾 Neto: $${report.netAmount.toFixed(2)} USDT
+
+🎯 *OBJETIVOS*
+🛑 Stop Loss: $${report.stopLoss.toFixed(2)} USDT
+🎯 Take Profit: $${report.takeProfit.toFixed(2)} USDT
+
+🔗 *ID:* ${report.signalId.substring(0, 8)}...
+━━━━━━━━━━━━━━━━━━━━
+${report.openedAt.toLocaleString('es-ES', {
             timeZone: 'America/Argentina/Buenos_Aires',
             year: 'numeric',
             month: '2-digit',
@@ -237,7 +268,7 @@ ${new Date().toLocaleString('es-ES', {
             await this.client.sendMessage(chatId, testMessage);
             this.logger.log('📱 Mensaje de test enviado correctamente');
         } catch (error) {
-            this.logger.error('❌ Error enviando mensaje de test:', error.message);
+            this.logger.error('❌ Error enviando mensaje de test:', this.getErrorMessage(error));
 
             // Intentar obtener más información sobre el error
             try {
@@ -251,5 +282,9 @@ ${new Date().toLocaleString('es-ES', {
 
     isConnected(): boolean {
         return this.isReady;
+    }
+
+    private getErrorMessage(error: unknown): string {
+        return error instanceof Error ? error.message : String(error);
     }
 }

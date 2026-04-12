@@ -4,11 +4,15 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Signal, SignalStatus } from '../entities/signal.entity';
 import { Movement, MovementType, MovementStatus } from '../entities/movement.entity';
+import { WhatsAppService } from '../../notifications/whatsapp.service';
+import { TelegramService } from '../../notifications/telegram.service';
 
 describe('SignalDatabaseService', () => {
   let service: SignalDatabaseService;
   let signalRepository: jest.Mocked<Repository<Signal>>;
   let movementRepository: jest.Mocked<Repository<Movement>>;
+  let mockWhatsAppService: { sendTradeReport: jest.Mock; sendPositionOpenReport: jest.Mock };
+  let mockTelegramService: { sendTradeReport: jest.Mock; sendPositionOpenReport: jest.Mock };
 
   const mockSignal = {
     id: 'test-signal-id',
@@ -70,6 +74,16 @@ describe('SignalDatabaseService', () => {
       findOne: jest.fn()
     };
 
+    mockWhatsAppService = {
+      sendTradeReport: jest.fn(),
+      sendPositionOpenReport: jest.fn()
+    };
+
+    mockTelegramService = {
+      sendTradeReport: jest.fn(),
+      sendPositionOpenReport: jest.fn()
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SignalDatabaseService,
@@ -80,6 +94,14 @@ describe('SignalDatabaseService', () => {
         {
           provide: getRepositoryToken(Movement),
           useValue: mockMovementRepo
+        },
+        {
+          provide: WhatsAppService,
+          useValue: mockWhatsAppService
+        },
+        {
+          provide: TelegramService,
+          useValue: mockTelegramService
         }
       ],
     }).compile();
@@ -206,6 +228,8 @@ describe('SignalDatabaseService', () => {
         relations: ['signal']
       });
       expect(movementRepository.save).toHaveBeenCalled();
+      expect(mockWhatsAppService.sendPositionOpenReport).toHaveBeenCalled();
+      expect(mockTelegramService.sendPositionOpenReport).toHaveBeenCalled();
       expect(checkAndCloseSignalSpy).toHaveBeenCalledWith('test-signal-id');
       expect(result.status).toBe(MovementStatus.FILLED);
     });
