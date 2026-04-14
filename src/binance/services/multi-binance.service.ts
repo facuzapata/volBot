@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import Binance from 'binance-api-node';
 import { User } from '../../users/entities/user.entity';
 import { UserCredentials } from '../../users/entities/user-credentials.entity';
+import { UserTradeConfig } from '../../users/entities/user-trade-config.entity';
 import { CreateOrderParams, CreateOCOParams } from '../interfaces/create-order-params';
 import { BinanceOrderResponse, BinanceOCOOrderResponse } from '../interfaces/binance-order-response.interface';
 import { SignalDatabaseService } from '../../strategy/services/signal-database.service';
@@ -30,6 +31,8 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
         private userRepository: Repository<User>,
         @InjectRepository(UserCredentials)
         private credentialsRepository: Repository<UserCredentials>,
+        @InjectRepository(UserTradeConfig)
+        private userTradeConfigRepository: Repository<UserTradeConfig>,
         private signalDbService: SignalDatabaseService
     ) { }
 
@@ -298,13 +301,41 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
         if (!userClient) return;
 
         try {
-            const account = await userClient.client.accountInfo();
-            const usdtBalance = await this.getBalanceForUser(userId, 'USDT');
+            await userClient.client.accountInfo();
+            const quoteAsset = await this.getPreferredQuoteAssetForUser(userId);
+            const quoteBalance = await this.getBalanceForUser(userId, quoteAsset);
 
-            this.logger.log(`✅ [${userClient.user.email}] Conectado exitosamente - Balance USDT: ${usdtBalance.toFixed(2)}`);
+            this.logger.log(`✅ [${userClient.user.email}] Conectado exitosamente - Balance ${quoteAsset}: ${quoteBalance.toFixed(2)}`);
         } catch (error) {
             this.logger.error(`❌ [${userClient.user.email}] Error verificando conexión:`, error);
         }
+    }
+
+    private async getPreferredQuoteAssetForUser(userId: string): Promise<string> {
+        const activeConfig = await this.userTradeConfigRepository.findOne({
+            where: {
+                userId,
+                isEnabled: true
+            },
+            order: {
+                updatedAt: 'DESC'
+            }
+        });
+
+        const symbol = activeConfig?.symbol || process.env.BINANCE_SYMBOL || 'BTCUSDT';
+        return this.extractQuoteAsset(symbol);
+    }
+
+    private extractQuoteAsset(symbol: string): string {
+        const knownQuoteAssets = ['USDT', 'USDC', 'BUSD', 'FDUSD', 'EUR', 'TRY', 'BRL'];
+
+        for (const quoteAsset of knownQuoteAssets) {
+            if (symbol.endsWith(quoteAsset)) {
+                return quoteAsset;
+            }
+        }
+
+        return 'USDT';
     }
 
     // Método para agregar nuevos usuarios en runtime
