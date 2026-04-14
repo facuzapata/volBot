@@ -1,33 +1,26 @@
 # volBot - Sistema de Trading Automatizado Multi-Usuario
 
-<div align="center">
-
-### 🤖 Bot de Trading Profesional con Soporte Multi-Usuario
-
 [![NestJS](https://img.shields.io/badge/NestJS-11.x-ec1a63?style=flat-square)](https://nestjs.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?style=flat-square)](https://www.typescriptlang.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-13%2B-336791?style=flat-square)](https://www.postgresql.org)
 [![Redis](https://img.shields.io/badge/Redis-7.x-DC382D?style=flat-square)](https://redis.io)
 
-</div>
+---
+
+## Descripción
+
+**volBot** es un sistema de trading automatizado para Binance con soporte multi-usuario.
+
+**Características:**
+- Multi-usuario: cada usuario con credenciales y capital independiente
+- Notificaciones privadas por Telegram y WhatsApp
+- Multi-símbolo y multi-timeframe
+- Análisis IA opcional: filtro pre-compra via Ollama (LLM local), controlado por variable de entorno
+- Multi-tenancy real: datos y órdenes aislados por usuario
 
 ---
 
-## 📋 Descripción
-
-**volBot** es un sistema de trading automatizado profesional que permite a múltiples usuarios tradear simultáneamente en Binance con:
-
-✨ **Características Principales:**
-- 👥 **Multi-usuario**: Cada usuario con credenciales independientes
-- 💬 **Notificaciones privadas**: Telegram y WhatsApp personalizados
-- 📈 **Multi-símbolo**: Operar BTC, ETH, ADA, DOGE, etc. simultáneamente
-- ⏱️ **Multi-timeframe**: 1m, 5m, 15m, 1h, 4h, etc.
-- 🔐 **Totalmente seguro**: Multi-tenancy real, datos aislados por usuario
-- 🚀 **Escalable**: Arquitectura profesional lista para producción
-
----
-
-## 🏗️ Arquitectura
+## Arquitectura
 
 ### Componentes Principales
 
@@ -67,10 +60,11 @@ Notificaciones (Telegram/WhatsApp)
 | **Cache** | Redis 7 |
 | **Exchange** | Binance API |
 | **Notificaciones** | Telegram + WhatsApp |
+| **Análisis IA** | Ollama (LLM local, qwen2.5) |
 
 ---
 
-## 🚀 Inicio Rápido
+## Inicio Rápido
 
 ### Prerequisitos
 
@@ -105,14 +99,14 @@ npm run start
 
 ### Configuración en 3 Pasos
 
-#### 1️⃣ Crear Usuario
+#### 1. Crear Usuario
 
 ```sql
 INSERT INTO users (email, name, capital_for_signals, capital_per_trade, profit_margin, sell_margin)
 VALUES ('trader@example.com', 'Juan Trader', 1000, 50, 0.005, 0.004);
 ```
 
-#### 2️⃣ Configurar Canales de Notificación
+#### 2. Configurar Canales de Notificación
 
 ```sql
 UPDATE users SET 
@@ -121,7 +115,7 @@ UPDATE users SET
 WHERE email = 'trader@example.com';
 ```
 
-#### 3️⃣ Agregar Símbolos a Tradear
+#### 3. Agregar Símbolos a Tradear
 
 ```sql
 -- Bitcoin 1 minuto
@@ -137,17 +131,13 @@ FROM users WHERE email = 'trader@example.com';
 
 ---
 
-## 📚 Documentación
+## Documentación
 
-- **[MULTI_USER_SYSTEM.md](./MULTI_USER_SYSTEM.md)** - Sistema multi-usuario en detalle
-- **[FASE2_TRADE_CONFIGS.md](./FASE2_TRADE_CONFIGS.md)** - Configuración de símbolos por usuario
-- **[FASE3_MULTI_WEBSOCKETS.md](./FASE3_MULTI_WEBSOCKETS.md)** - WebSockets multi-símbolo
-- **[FASE4_STRATEGY_REFACTOR_PLAN.md](./FASE4_STRATEGY_REFACTOR_PLAN.md)** - Plan de refactorización
-- **[CAMBIOS_REALIZADOS.md](./CAMBIOS_REALIZADOS.md)** - Historial de cambios
+Ver variables de entorno en `.env.example`.
 
 ---
 
-## 📁 Estructura del Proyecto
+## Estructura del Proyecto
 
 ```
 src/
@@ -155,40 +145,38 @@ src/
 ├── main.ts
 ├── binance/
 │   ├── services/
-│   │   ├── binance-multi-ws.service.ts      ✨ WebSockets multi-símbolo
+│   │   ├── binance-multi-ws.service.ts      # WebSockets multi-símbolo
 │   │   └── multi-binance.service.ts
 │   ├── interfaces/
-│   │   └── binance-order-response.interface.ts
 │   └── binance.module.ts
 ├── strategy/
 │   ├── services/
-│   │   ├── multi-user-strategy.service.ts   ✨ Estrategia multi-usuario
+│   │   ├── multi-user-strategy.service.ts   # Estrategia principal multi-usuario
+│   │   ├── ai-analysis.service.ts           # Filtro IA pre-compra via Ollama
 │   │   ├── signal-database.service.ts
 │   │   └── candle-cache.service.ts
 │   ├── entities/
 │   ├── interfaces/
 │   └── strategy.module.ts
 ├── notifications/
-│   ├── telegram.service.ts                  ✨ Notificaciones por usuario
-│   ├── whatsapp.service.ts                  ✨ Notificaciones por usuario
+│   ├── telegram.service.ts
+│   ├── whatsapp.service.ts
 │   └── notifications.module.ts
 ├── users/
 │   ├── entities/
 │   │   ├── user.entity.ts
 │   │   ├── user-credentials.entity.ts
-│   │   └── user-trade-config.entity.ts      ✨ Configuración de símbolos
+│   │   └── user-trade-config.entity.ts
 │   ├── services/
-│   │   └── user-trade-config.service.ts
 │   └── users.module.ts
-├── trading/
-│   └── trading.service.ts
+├── auth/
 └── utils/
     └── indicators.ts
 ```
 
 ---
 
-## 🔄 Flujo de Funcionamiento
+## Flujo de Funcionamiento
 
 ```
 1. Sistema inicia
@@ -199,72 +187,58 @@ src/
        (compartido entre usuarios que lo necesiten)
 
 3. Al llegar vela completada
-   └─> MultiUserStrategyService.processCandleMulti()
+   └─> MultiUserStrategyService.processCandle()
        ├─> Agrega vela al cache (por símbolo)
-       ├─> Calcula indicadores (por símbolo)
+       ├─> Calcula indicadores técnicos (RSI, MACD, BB, ATR, SMA/EMA, volumen)
        └─> Para cada usuario con este símbolo:
-           ├─> Analiza condiciones de mercado
-           ├─> Genera señales si corresponde
-           └─> Envía notificación privada
+           ├─> Evalúa condiciones de mercado (6 condiciones)
+           ├─> Si pasan >= 5/6 condiciones:
+           │   ├─> [ANALISIS_IA=true] AiAnalysisService: consulta Ollama con contexto completo
+           │   │   ├─> APPROVE + confidence >= IA_MIN_CONFIDENCE => genera orden
+           │   │   └─> REJECT o timeout => bloquea o deja pasar (según IA_BLOCKS_TRADES)
+           │   └─> [ANALISIS_IA=false] genera orden directamente
+           └─> Envía notificación privada al usuario
 
-4. Órdenes generadas
+4. Orden generada
    └─> MultiBinanceService
-       └─> Ejecuta con credenciales del usuario
+       └─> Ejecuta con credenciales del usuario (MARKET buy + LIMIT/OCO sell)
 ```
 
 ---
 
-## 🔐 Seguridad
+## Seguridad
 
-✅ **Multi-tenancy Real:**
-- Cada usuario operva con sus credenciales
+**Multi-tenancy real:**
+- Cada usuario opera con sus credenciales propias
 - Las órdenes están filtradas por usuario_id
 - Las notificaciones son privadas
 
-✅ **Aislamiento de Datos:**
-- Base de datos normalizada
-- Índices por usuario
+**Aislamiento de datos:**
+- Base de datos normalizada, índices por usuario
 - Queries filtradas por usuario_id
 
-✅ **Mejoras para Producción:**
+**Pendiente para producción:**
 - Encriptación de credenciales API
 - Rate limiting por usuario
-- Auditoría de acciones
-- MFA para acceso
+- MFA
 
 ---
 
-## 📊 Monitoreo
+## Monitoreo
 
-### Logs
+Logs en tiempo real con `docker compose logs -f app`.
 
-El sistema genera logs detallados:
-
-```bash
-npm run start
-
-# Salida esperada:
-# 🚀 Estrategia multi-usuario inicializada - Modo: PAPER TRADING
-# 📥 Cargando configuración para 2 usuarios activos...
-# 📡 Conectando WebSocket: BTCUSDT 1m
-# ✅ WebSocket conectado: BTCUSDT 1m
-# 📊 Esperando más velas para análisis técnico: 25/50
+Ejemplo de salida:
 ```
-
-### Métricas (Próximas)
-
-```
-GET /metrics
-  - Usuarios activos
-  - WebSockets conectados
-  - Señales generadas (total, por usuario)
-  - Órdenes ejecutadas
-  - Rendimiento por usuario
+MultiUserStrategyService - Estrategia inicializada - Modo: PAPER TRADING
+MultiUserStrategyService - WebSocket conectado: BTCUSDT 1m
+AiAnalysisService        - [AiAnalysis][Usuario x] Compra aprobada (ollama) conf=0.781
+MultiUserStrategyService - [Usuario x] GENERANDO SEÑAL DE COMPRA a 84320.50
 ```
 
 ---
 
-## 📝 Variables de Entorno
+## Variables de Entorno
 
 ```env
 # Binance
@@ -275,78 +249,66 @@ BINANCE_TESTNET=true
 # Notificaciones
 TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=your_token
-TELEGRAM_CHAT_ID=your_chat_id  # Fallback global
+TELEGRAM_CHAT_ID=your_chat_id
 
-WHATSAPP_ENABLED=true
-WHATSAPP_NUMBER=+5491123456789  # Fallback global
+WHATSAPP_ENABLED=false
+WHATSAPP_NUMBER=+5491123456789
 
 # Trading
 PAPER_TRADING=true
 PORT=3000
 
 # Base de Datos
-DATABASE_URL=postgresql://user:password@localhost/volbot
-REDIS_URL=redis://localhost:6379
+DB_HOST=db
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+DB_NAME=postgres
+REDIS_URL=redis://redis:6379
+
+# Análisis IA (Ollama)
+# ANALISIS_IA=false      => la IA no interviene, opera como siempre
+# ANALISIS_IA=true       => cada señal candidata de compra pasa por Ollama
+# IA_BLOCKS_TRADES=false => si Ollama falla/timeout, permite la operación igual
+# IA_BLOCKS_TRADES=true  => si Ollama falla/timeout, bloquea por seguridad
+ANALISIS_IA=false
+IA_BLOCKS_TRADES=false
+OLLAMA_URL=http://ollama:11434
+OLLAMA_MODEL=qwen2.5:1.5b-instruct
+OLLAMA_TIMEOUT_MS=20000
+IA_MIN_CONFIDENCE=0.65
 ```
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
-# Tests unitarios
 npm run test
-
-# Tests con cobertura
 npm run test:cov
-
-# Tests E2E
 npm run test:e2e
 ```
 
 ---
 
-## 🔄 Roadmap
+## Roadmap
 
-### ✅ Completado
+**Completado:**
+- Multi-usuario con credenciales y capital independiente
+- Notificaciones privadas por usuario (Telegram / WhatsApp)
+- WebSockets multi-símbolo
+- Análisis IA opcional via Ollama
 
-- FASE 1: Notificaciones por usuario
-- FASE 2: Configuración de símbolos por usuario
-- FASE 3: WebSockets multi-símbolo
-- Arquitectura profesional y limpia
-
-### 🔄 En Desarrollo
-
-- FASE 4: Refactorización completa de estrategias
-
-### ⏭️ Próximo
-
-- FASE 5: Dashboard web
-- FASE 6: Backtesting multi-usuario
-- API REST completa con autenticación
-- Monitoring y alertas avanzadas
+**En desarrollo:**
+- Dashboard web
+- Backtesting multi-usuario
+- API REST completa
 
 ---
 
-## 🤝 Soporte
-
-Para preguntas o issues, abre un issue en GitHub o contacta al equipo de desarrollo.
-
----
-
-## 📄 Licencia
+## Licencia
 
 Privado - Todos los derechos reservados
-
----
-
-<div align="center">
-
-**Made with ❤️ by the volBot Team**
-
-</div>
-
-Este sistema modular y extensible permite comenzar con un trading automatizado seguro y controlado, mostrando señales en consola y gestionando trades simulados. Está preparado para escalar a integración con exchanges reales y funcionalidades avanzadas.
 
 Si necesitás ayuda para expandirlo o integrarlo con Binance, avisame.
 
