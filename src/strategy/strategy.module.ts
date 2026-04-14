@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MultiUserStrategyService } from './services/multi-user-strategy.service';
 import { SignalDatabaseService } from './services/signal-database.service';
 import { CandleCacheService } from './services/candle-cache.service';
+import { AiAnalysisService } from './services/ai-analysis.service';
 import { BinanceModule } from 'src/binance/binance.module';
 import { Signal, Movement } from './entities';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -18,12 +19,14 @@ import { UserCredentials } from '../users/entities/user-credentials.entity';
   providers: [
     MultiUserStrategyService,
     SignalDatabaseService,
-    CandleCacheService
+    CandleCacheService,
+    AiAnalysisService
   ],
   exports: [
     MultiUserStrategyService,
     SignalDatabaseService,
-    CandleCacheService
+    CandleCacheService,
+    AiAnalysisService
   ],
 })
 export class StrategyModule { }

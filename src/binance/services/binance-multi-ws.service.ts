@@ -117,6 +117,8 @@ export class BinanceMultiWsService implements OnModuleInit, OnModuleDestroy {
 
                     // Solo procesar cuando la vela está completa (x: true)
                     if (kline.x) {
+                        this.logger.debug(`🕯️ Vela cerrada recibida: ${symbol} ${timeframeMinutes}m @ ${candle.close}`);
+
                         // Procesar la vela completada
                         if (this.strategyCallback) {
                             this.strategyCallback.processCandle(candle, symbol, timeframeMinutes).catch((error) => {

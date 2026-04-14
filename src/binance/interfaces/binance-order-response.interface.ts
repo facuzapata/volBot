@@ -1,5 +1,36 @@
 import { MovementStatus } from 'src/strategy/entities';
 
+export interface BinanceOCOOrderResponse {
+    orderListId: number;
+    contingencyType: string;
+    listStatusType: string;
+    listOrderStatus: string;
+    listClientOrderId: string;
+    transactionTime: number;
+    symbol: string;
+    orders: Array<{
+        symbol: string;
+        orderId: number;
+        clientOrderId: string;
+    }>;
+    orderReports: Array<{
+        symbol: string;
+        orderId: number;
+        orderListId: number;
+        clientOrderId: string;
+        transactTime: number;
+        price: string;
+        origQty: string;
+        executedQty: string;
+        cummulativeQuoteQty: string;
+        status: string;
+        timeInForce: string;
+        type: string;
+        side: string;
+        stopPrice?: string;
+    }>;
+}
+
 export interface BinanceOrderResponse {
     id(id: any, FILLED: MovementStatus, arg2: { binanceResponse: BinanceOrderResponse; }): unknown;
     symbol: string;

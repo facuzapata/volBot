@@ -5,8 +5,8 @@ import { Repository } from 'typeorm';
 import Binance from 'binance-api-node';
 import { User } from '../../users/entities/user.entity';
 import { UserCredentials } from '../../users/entities/user-credentials.entity';
-import { CreateOrderParams } from '../interfaces/create-order-params';
-import { BinanceOrderResponse } from '../interfaces/binance-order-response.interface';
+import { CreateOrderParams, CreateOCOParams } from '../interfaces/create-order-params';
+import { BinanceOrderResponse, BinanceOCOOrderResponse } from '../interfaces/binance-order-response.interface';
 import { SignalDatabaseService } from '../../strategy/services/signal-database.service';
 
 interface UserBinanceClient {
@@ -206,7 +206,7 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
             return response;
 
         } catch (error) {
-            if (error.code === -1021) {
+            if ((error as any).code === -1021) {
                 this.logger.warn(`⚠️ [${userClient.user.email}] Error de timestamp, re-sincronizando...`);
                 await this.syncServerTime(userId);
                 const response = await userClient.client.order(orderParams);
@@ -347,7 +347,7 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
             return response;
         } catch (error) {
             // Manejo específico del error de timestamp
-            if (error.code === -1021) {
+            if ((error as any).code === -1021) {
                 this.logger.warn(`⚠️ [${userClient.user.email}] Error de timestamp al consultar orden, re-sincronizando...`);
                 await this.syncServerTime(userId);
 
@@ -362,6 +362,96 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
 
             this.logger.error(`❌ [${userClient.user.email}] Error consultando orden ${orderId}:`, error);
             throw error;
+        }
+    }
+
+    /**
+     * Crear una orden OCO (take profit + stop loss) para un usuario
+     */
+    async createOCOOrderForUser(
+        userId: string,
+        params: CreateOCOParams,
+        tpMovementId: string,
+        slMovementId: string
+    ): Promise<BinanceOCOOrderResponse> {
+        const userClient = await this.getUserClient(userId);
+        if (!userClient) {
+            throw new Error(`Cliente no disponible para usuario ${userId}`);
+        }
+
+        const stepSize = params.symbol === 'BTCUSDT' ? 0.00001 : 0.00000001;
+        const formattedQty = (Math.floor(params.quantity / stepSize) * stepSize).toFixed(
+            params.symbol === 'BTCUSDT' ? 5 : 8
+        );
+
+        const ocoParams: any = {
+            symbol: params.symbol,
+            side: params.side,
+            quantity: formattedQty,
+            price: Number(params.price.toFixed(2)),
+            stopPrice: Number(params.stopPrice.toFixed(2)),
+            stopLimitPrice: Number(params.stopLimitPrice.toFixed(2)),
+            stopLimitTimeInForce: params.stopLimitTimeInForce || 'GTC',
+        };
+
+        this.logger.log(`📝 [${userClient.user.email}] Creando OCO ${params.side} ${params.symbol}: qty=${formattedQty} TP=${ocoParams.price} SL_trigger=${ocoParams.stopPrice} SL_limit=${ocoParams.stopLimitPrice}`);
+
+        try {
+            const response: BinanceOCOOrderResponse = await userClient.client.orderOco(ocoParams);
+            this.logger.log(`✅ [${userClient.user.email}] OCO creada: orderListId=${response.orderListId}`);
+
+            // La OCO devuelve dos orderReports: [LIMIT_MAKER (TP), STOP_LOSS_LIMIT (SL)]
+            const tpReport = response.orderReports?.find((r: any) => r.type === 'LIMIT_MAKER');
+            const slReport = response.orderReports?.find((r: any) => r.type === 'STOP_LOSS_LIMIT');
+
+            if (tpReport) {
+                await this.signalDbService.updateMovementWithOrderData(tpMovementId, {
+                    binanceOrderId: tpReport.orderId,
+                    clientOrderId: tpReport.clientOrderId,
+                    status: tpReport.status,
+                    executedQty: tpReport.executedQty,
+                    price: tpReport.price,
+                    fills: [],
+                    transactTime: tpReport.transactTime,
+                    fullResponse: { ...tpReport, orderListId: response.orderListId }
+                });
+            }
+
+            if (slReport) {
+                await this.signalDbService.updateMovementWithOrderData(slMovementId, {
+                    binanceOrderId: slReport.orderId,
+                    clientOrderId: slReport.clientOrderId,
+                    status: slReport.status,
+                    executedQty: slReport.executedQty,
+                    price: slReport.price,
+                    fills: [],
+                    transactTime: slReport.transactTime,
+                    fullResponse: { ...slReport, orderListId: response.orderListId }
+                });
+            }
+
+            return response;
+        } catch (error) {
+            if ((error as any).code === -1021) {
+                this.logger.warn(`⚠️ [${userClient.user.email}] Timestamp error en OCO, re-sincronizando...`);
+                await this.syncServerTime(userId);
+                const response: BinanceOCOOrderResponse = await userClient.client.orderOco(ocoParams);
+                this.logger.log(`✅ [${userClient.user.email}] OCO creada tras re-sync: orderListId=${response.orderListId}`);
+                return response;
+            }
+            this.logger.error(`❌ [${userClient.user.email}] Error creando OCO:`, error);
+            throw error;
+        }
+    }
+
+    async cancelOCOOrderForUser(userId: string, symbol: string, orderListId: number): Promise<void> {
+        const userClient = await this.getUserClient(userId);
+        if (!userClient) return;
+        try {
+            await userClient.client.cancelOpenOrders({ symbol });
+            this.logger.log(`🗑️ [${userClient.user.email}] OCO cancelada: orderListId=${orderListId}`);
+        } catch (error) {
+            this.logger.error(`❌ [${userClient.user.email}] Error cancelando OCO ${orderListId}:`, error);
         }
     }
 

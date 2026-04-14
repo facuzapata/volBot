@@ -4,6 +4,7 @@ import { Movement } from './movement.entity';
 export enum SignalStatus {
     ACTIVE = 'active',
     MATCHED = 'matched',
+    STOPPED = 'stopped',   // Cerrada por stop loss
     EXPIRED = 'expired',
     CANCELLED = 'cancelled'
 }
@@ -11,68 +12,68 @@ export enum SignalStatus {
 @Entity('signals')
 export class Signal {
     @PrimaryGeneratedColumn('uuid')
-    id: string;
+    id!: string;
 
     @Column({ type: 'varchar', length: 20 })
-    symbol: string;
+    symbol!: string;
 
     @Column({ type: 'uuid', nullable: true }) // Nullable para compatibilidad con señales existentes
-    userId: string;
+    userId!: string;
 
     @Column({ type: 'enum', enum: SignalStatus, default: SignalStatus.ACTIVE })
-    status: SignalStatus;
+    status!: SignalStatus;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    initialPrice: number;
+    initialPrice!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    finalPrice: number;
+    finalPrice!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    stopLoss: number;
+    stopLoss!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    takeProfit: number;
+    takeProfit!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    atr: number;
+    atr!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    rsi: number;
+    rsi!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    macd: number;
+    macd!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    smaShort: number;
+    smaShort!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    smaLong: number;
+    smaLong!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    volume: number;
+    volume!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8, default: 0 })
-    totalProfit: number;
+    totalProfit!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8, default: 0 })
-    totalCommission: number;
+    totalCommission!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8, default: 0 })
-    netProfit: number;
+    netProfit!: number;
 
     @Column({ type: 'boolean', default: true })
-    paperTrading: boolean;
+    paperTrading!: boolean;
 
     @CreateDateColumn()
-    createdAt: Date;
+    createdAt!: Date;
 
     @UpdateDateColumn()
-    updatedAt: Date;
+    updatedAt!: Date;
 
     @Column({ type: 'timestamp', nullable: true })
-    closedAt: Date;
+    closedAt!: Date;
 
     @OneToMany(() => Movement, movement => movement.signal)
-    movements: Movement[];
+    movements!: Movement[];
 }

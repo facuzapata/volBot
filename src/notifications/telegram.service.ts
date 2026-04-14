@@ -179,10 +179,11 @@ export class TelegramService {
     private formatTradeMessage(report: TradeReport): string {
         const mode = report.paperTrading ? 'PAPER TRADING' : 'TRADING REAL';
         const profitEmoji = report.netProfit > 0 ? '✅' : '❌';
-        const profitLabel = report.netProfit > 0 ? 'GANANCIA' : 'PERDIDA';
+        const profitLabel = report.stoppedByStopLoss ? 'STOP LOSS' : (report.netProfit > 0 ? 'GANANCIA' : 'PERDIDA');
+        const titleEmoji = report.stoppedByStopLoss ? '🛑' : '🤖';
 
         return [
-            '🤖 <b>VolBot - Cierre de Operacion</b>',
+            `${titleEmoji} <b>VolBot - Cierre de Operacion</b>`,
             '',
             `📌 <b>Modo:</b> ${mode}`,
             `📈 <b>Par:</b> ${report.symbol}`,

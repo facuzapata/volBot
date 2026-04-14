@@ -265,9 +265,10 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     private formatTradeMessage(report: TradeReport): string {
         const mode = report.paperTrading ? '📝 PAPER TRADING' : '💰 TRADING REAL';
         const profitEmoji = report.netProfit > 0 ? '💚' : '❌';
-        const profitText = report.netProfit > 0 ? 'GANANCIA' : 'PÉRDIDA';
+        const profitText = report.stoppedByStopLoss ? 'STOP LOSS' : (report.netProfit > 0 ? 'GANANCIA' : 'PÉRDIDA');
+        const titleEmoji = report.stoppedByStopLoss ? '🛑' : '🤖';
 
-        return `🤖 *VolBot - Trading Report*
+        return `${titleEmoji} *VolBot - Trading Report*
 
 ${mode}
 

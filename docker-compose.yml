@@ -24,6 +24,15 @@ services:
       - redisdata:/data
     command: redis-server --appendonly yes
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: volbot_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
   app:
     build: .
     container_name: profit_bot_app
@@ -38,7 +47,9 @@ services:
     depends_on:
       - db
       - redis
+      - ollama
 
 volumes:
   pgdata:
   redisdata:
+  ollama_data:
