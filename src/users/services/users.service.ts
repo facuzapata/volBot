@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from '../entities/user.entity';
+import * as bcrypt from 'bcrypt';
+import { User, UserRole } from '../entities/user.entity';
 import { UserCredentials } from '../entities/user-credentials.entity';
 
 @Injectable()
@@ -33,17 +34,60 @@ export class UsersService {
         });
     }
 
+    async findByEmail(email: string): Promise<User | null> {
+        return this.userRepository.findOne({
+            where: { email },
+            relations: ['credentials']
+        });
+    }
+
+    async findAuthByEmail(email: string): Promise<User | null> {
+        return this.userRepository
+            .createQueryBuilder('user')
+            .addSelect('user.passwordHash')
+            .where('user.email = :email', { email })
+            .getOne();
+    }
+
     async createUser(userData: {
         email: string;
         name: string;
+        password: string;
+        role?: UserRole;
         capitalForSignals?: number;
         capitalPerTrade?: number;
         profitMargin?: number;
         sellMargin?: number;
         maxActiveSignals?: number;
     }): Promise<User> {
-        const user = this.userRepository.create(userData);
+        const passwordHash = await bcrypt.hash(userData.password, 10);
+
+        const user = this.userRepository.create({
+            ...userData,
+            email: userData.email.toLowerCase().trim(),
+            passwordHash
+        });
         return this.userRepository.save(user);
+    }
+
+    async updateUserPassword(userId: string, password: string): Promise<void> {
+        const passwordHash = await bcrypt.hash(password, 10);
+        await this.userRepository.update(userId, { passwordHash });
+    }
+
+    async updateOwnProfile(userId: string, profile: {
+        name?: string;
+        telegramChatId?: string;
+        whatsappNumber?: string;
+        telegramEnabled?: boolean;
+        whatsappEnabled?: boolean;
+    }): Promise<User> {
+        await this.userRepository.update(userId, profile);
+        const updatedUser = await this.findById(userId);
+        if (!updatedUser) {
+            throw new Error(`Usuario ${userId} no encontrado`);
+        }
+        return updatedUser;
     }
 
     async addCredentials(userId: string, credentialsData: {

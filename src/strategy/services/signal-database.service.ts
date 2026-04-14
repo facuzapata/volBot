@@ -42,7 +42,6 @@ export class SignalDatabaseService {
             totalCommission: 0,
             netProfit: 0,
         });
-
         const savedSignal = await this.signalRepository.save(signal);
         this.logger.log(`📊 Nueva señal creada: ${savedSignal.id} - ${savedSignal.symbol} @ ${savedSignal.initialPrice}`);
         return savedSignal;
@@ -160,6 +159,12 @@ export class SignalDatabaseService {
             await this.checkAndCloseSignal(movement.signalId);
         }
 
+        // Leg OCO cancelada: verificar si la otra leg ya se ejecutó y hay que cerrar
+        if (status === MovementStatus.CANCELLED && movement.type === MovementType.SELL) {
+            this.logger.log(`🔍 Movimiento SELL cancelado (leg OCO), verificando cierre de señal ${movement.signalId}...`);
+            await this.checkAndCloseSignal(movement.signalId);
+        }
+
         return updatedMovement;
     }
 
@@ -176,16 +181,31 @@ export class SignalDatabaseService {
 
         const movements = signal.movements;
         const buyMovements = movements.filter(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
-        const sellMovements = movements.filter(m => m.type === MovementType.SELL && m.status === MovementStatus.FILLED);
+        // CANCELLED se puede dar cuando la otra leg OCO cancela ésta automáticamente
+        const sellMovements = movements.filter(m => m.type === MovementType.SELL && (m.status === MovementStatus.FILLED || m.status === MovementStatus.CANCELLED));
+        // Para residual: solo contar qty realmente vendida (FILLED)
+        const filledSellQty = movements
+            .filter(m => m.type === MovementType.SELL && m.status === MovementStatus.FILLED)
+            .reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
+        const totalBuyQuantity = buyMovements.reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
+        const totalSellQuantity = filledSellQty;
+        const residualQuantity = Math.max(0, totalBuyQuantity - totalSellQuantity);
+        const dustThreshold = 0.00002;
+        const minNotional = Number(process.env.BINANCE_MIN_NOTIONAL || 5);
+        const referencePriceForResidual = Number(signal.takeProfit) > 0 ? Number(signal.takeProfit) : Number(signal.initialPrice);
+        const residualNotional = residualQuantity * referencePriceForResidual;
+        const residualIsSellable = residualQuantity > dustThreshold && residualNotional >= minNotional;
 
         this.logger.log(`🔍 Verificando cierre de señal ${signalId}:`);
         this.logger.log(`  📊 Total movimientos: ${movements.length}`);
         this.logger.log(`  🟢 Compras FILLED: ${buyMovements.length}`);
         this.logger.log(`  🔴 Ventas FILLED: ${sellMovements.length}`);
+        this.logger.log(`  📊 Qty comprada: ${totalBuyQuantity.toFixed(8)} | Qty vendida: ${totalSellQuantity.toFixed(8)} | Residual: ${residualQuantity.toFixed(8)}`);
+        this.logger.log(`  📊 Residual notional estimado: ${residualNotional.toFixed(4)} USDT (min: ${minNotional})`);
         this.logger.log(`  📈 Status actual de la señal: ${signal.status}`);
 
-        // Si tenemos al menos una compra y una venta, podemos cerrar la señal
-        if (buyMovements.length > 0 && sellMovements.length > 0) {
+        // Cerrar sólo cuando ya no quede residual vendible.
+        if (buyMovements.length > 0 && sellMovements.length > 0 && !residualIsSellable) {
             this.logger.log(`✅ CONDICIONES CUMPLIDAS - Cerrando señal ${signalId}`);
             this.logger.log(`  - Compras ejecutadas: ${buyMovements.length}`);
             this.logger.log(`  - Ventas ejecutadas: ${sellMovements.length}`);
@@ -194,6 +214,9 @@ export class SignalDatabaseService {
             this.logger.debug(`⏳ Señal ${signalId} aún no lista para cerrar:`);
             this.logger.debug(`  - Faltan compras FILLED: ${buyMovements.length === 0 ? 'SÍ' : 'NO'}`);
             this.logger.debug(`  - Faltan ventas FILLED: ${sellMovements.length === 0 ? 'SÍ' : 'NO'}`);
+            if (buyMovements.length > 0 && sellMovements.length > 0 && residualIsSellable) {
+                this.logger.debug(`  - Residual vendible pendiente: qty=${residualQuantity.toFixed(8)}, notional=${residualNotional.toFixed(4)} USDT`);
+            }
         }
     }
 
@@ -230,13 +253,21 @@ export class SignalDatabaseService {
     }
 
     private async closeSignal(signalId: string, buyMovements: Movement[], sellMovements: Movement[]): Promise<void> {
+        // Solo los FILLED contribuyen al P&L (los CANCELLED son la leg OCO cancelada)
+        const filledSells = sellMovements.filter(m => m.status === MovementStatus.FILLED);
+
         // Calcular el precio final promedio de venta con validación
-        const totalSellAmount = sellMovements.reduce((sum, m) => {
+        const totalSellAmount = filledSells.reduce((sum, m) => {
             const amount = Number(m.totalAmount);
             return sum + (isFinite(amount) && !isNaN(amount) ? amount : 0);
         }, 0);
 
-        const totalSellQuantity = sellMovements.reduce((sum, m) => {
+        const totalSellQuantity = filledSells.reduce((sum, m) => {
+            const quantity = Number(m.quantity);
+            return sum + (isFinite(quantity) && !isNaN(quantity) ? quantity : 0);
+        }, 0);
+
+        const totalBuyQuantity = buyMovements.reduce((sum, m) => {
             const quantity = Number(m.quantity);
             return sum + (isFinite(quantity) && !isNaN(quantity) ? quantity : 0);
         }, 0);
@@ -248,8 +279,11 @@ export class SignalDatabaseService {
         buyMovements.forEach((m, index) => {
             this.logger.debug(`  📊 Compra ${index + 1}: totalAmount=${m.totalAmount}, commission=${m.commission}, quantity=${m.quantity}`);
         });
-        sellMovements.forEach((m, index) => {
-            this.logger.debug(`  📊 Venta ${index + 1}: totalAmount=${m.totalAmount}, commission=${m.commission}, quantity=${m.quantity}`);
+        filledSells.forEach((m, index) => {
+            this.logger.debug(`  📊 Venta FILLED ${index + 1}: totalAmount=${m.totalAmount}, commission=${m.commission}, quantity=${m.quantity}`);
+        });
+        sellMovements.filter(m => m.status === MovementStatus.CANCELLED).forEach((m, index) => {
+            this.logger.debug(`  📊 Venta CANCELLED ${index + 1} (leg OCO): ignorada en P&L`);
         });
 
         // Calcular comisiones totales con validación
@@ -268,20 +302,34 @@ export class SignalDatabaseService {
             const amount = Number(m.totalAmount);
             return sum + (isFinite(amount) && !isNaN(amount) ? amount : 0);
         }, 0);
-        const totalProfit = totalSellAmount - totalBuyAmount;
+
+        // Si quedó remanente de activo base (dust), lo valuamos al precio promedio de salida.
+        // Esto evita pérdidas "falsas" cuando se vende menos por step size/comisión en activo base.
+        const residualQuantity = Math.max(0, totalBuyQuantity - totalSellQuantity);
+        const dustThreshold = 0.00002;
+        const residualValue = avgSellPrice > 0 && residualQuantity > 0 && residualQuantity <= dustThreshold
+            ? residualQuantity * avgSellPrice
+            : 0;
+        const effectiveSellAmount = totalSellAmount + residualValue;
+
+        const totalProfit = effectiveSellAmount - totalBuyAmount;
 
         // Calcular beneficio neto
         const netProfit = totalProfit - totalCommission;
 
         this.logger.debug(`📊 Cálculos de cierre:`);
         this.logger.debug(`  💰 Total venta: ${totalSellAmount.toFixed(8)}`);
+        if (residualValue > 0) {
+            this.logger.debug(`  🧮 Remanente valorizado: qty=${residualQuantity.toFixed(8)} value=${residualValue.toFixed(8)}`);
+            this.logger.debug(`  💰 Total venta efectivo (incluye remanente): ${effectiveSellAmount.toFixed(8)}`);
+        }
         this.logger.debug(`  💰 Total compra: ${totalBuyAmount.toFixed(8)}`);
         this.logger.debug(`  💰 Beneficio bruto: ${totalProfit.toFixed(8)}`);
         this.logger.debug(`  💰 Comisiones totales: ${totalCommission.toFixed(8)}`);
         this.logger.debug(`  💰 Beneficio neto: ${netProfit.toFixed(8)}`);
 
         // Validar valores antes de actualizar en base de datos
-        const values = { avgSellPrice, totalCommission, totalProfit, netProfit, totalSellAmount, totalBuyAmount };
+        const values = { avgSellPrice, totalCommission, totalProfit, netProfit, effectiveSellAmount, totalBuyAmount };
         for (const [key, value] of Object.entries(values)) {
             if (!isFinite(value) || isNaN(value)) {
                 this.logger.error(`❌ Valor inválido en closeSignal ${key}: ${value}`);
@@ -291,9 +339,32 @@ export class SignalDatabaseService {
             }
         }
 
+        // Detectar si el cierre fue por stop loss: la SL leg ejecutada tiene precio < precio de compra
+        const filledSellForStatus = filledSells[0];
+        const signalData = await this.signalRepository.findOne({ where: { id: signalId } });
+        const initialPrice = Number(signalData?.initialPrice || 0);
+        const stoppedByStopLoss = filledSellForStatus
+            ? Number(filledSellForStatus.price) < initialPrice
+            : false;
+        const finalStatus = stoppedByStopLoss ? SignalStatus.STOPPED : SignalStatus.MATCHED;
+
+        // Si fue SL: marcar en DB la leg de TP pendiente como CANCELLED
+        if (stoppedByStopLoss) {
+            const signalWithMovements = await this.signalRepository.findOne({ where: { id: signalId }, relations: ['movements'] });
+            if (signalWithMovements) {
+                const tpPending = signalWithMovements.movements.find(
+                    m => m.type === MovementType.SELL && m.status === MovementStatus.PENDING
+                );
+                if (tpPending) {
+                    await this.movementRepository.update(tpPending.id, { status: MovementStatus.CANCELLED });
+                    this.logger.log(`🗑️ Leg TP cancelada en DB (OCO SL ejecutado): ${tpPending.id}`);
+                }
+            }
+        }
+
         // Actualizar la señal
         await this.signalRepository.update(signalId, {
-            status: SignalStatus.MATCHED,
+            status: finalStatus,
             finalPrice: avgSellPrice,
             totalProfit,
             totalCommission,
@@ -301,8 +372,7 @@ export class SignalDatabaseService {
             closedAt: new Date()
         });
 
-        this.logger.log(`✅ SEÑAL COMPLETADA: ${signalId}`);
-        this.logger.log(`📊 Status actualizado: ACTIVE → MATCHED`);
+        this.logger.log(`✅ SEÑAL COMPLETADA: ${signalId} → ${finalStatus.toUpperCase()}${stoppedByStopLoss ? ' 🛑 STOP LOSS' : ' ✅ TAKE PROFIT'}`);
         this.logger.log(`📊 Resumen: Precio final: ${avgSellPrice.toFixed(2)}, Beneficio bruto: ${totalProfit.toFixed(4)} USDT, Comisiones: ${totalCommission.toFixed(4)} USDT, Beneficio neto: ${netProfit.toFixed(4)} USDT`);
         this.logger.log(`💹 ROI: ${((netProfit / totalBuyAmount) * 100).toFixed(2)}%`);
 
@@ -313,7 +383,8 @@ export class SignalDatabaseService {
             totalCommission,
             netProfit,
             totalBuyAmount,
-            totalSellAmount
+            totalSellAmount: effectiveSellAmount,
+            stoppedByStopLoss
         });
     }
 
@@ -328,6 +399,7 @@ export class SignalDatabaseService {
             netProfit: number;
             totalBuyAmount: number;
             totalSellAmount: number;
+            stoppedByStopLoss: boolean;
         }
     ): Promise<void> {
         try {
@@ -390,7 +462,8 @@ export class SignalDatabaseService {
                 profitPercent,
                 roi,
                 duration,
-                paperTrading: signal.paperTrading
+                paperTrading: signal.paperTrading,
+                stoppedByStopLoss: calculations.stoppedByStopLoss,
             };
 
             await Promise.allSettled([
@@ -666,6 +739,11 @@ export class SignalDatabaseService {
         transactTime?: number;
         fullResponse?: any;
     }): Promise<Movement> {
+        const existingMovement = await this.movementRepository.findOne({ where: { id: movementId } });
+        if (!existingMovement) {
+            throw new Error(`Movimiento ${movementId} no encontrado antes de actualizar`);
+        }
+
         const updateData: any = {
             binanceOrderId: orderData.binanceOrderId.toString(),
             binanceClientOrderId: orderData.clientOrderId,
@@ -691,24 +769,23 @@ export class SignalDatabaseService {
                 this.logger.debug(`🔍 fills disponibles: ${orderData.fills ? 'SÍ' : 'NO'} (${orderData.fills?.length || 0} fills)`);
                 this.logger.debug(`🔍 fullResponse: ${JSON.stringify(orderData.fullResponse)}`);
 
-                let netQuantity = Number(orderData.executedQty);
+                const executedQty = Number(orderData.executedQty);
+                let netQuantity = executedQty;
+                const symbol = orderData.fullResponse?.symbol || orderData.fullResponse?.origSymbol || process.env.BINANCE_SYMBOL || 'BTCUSDT';
+                const baseAsset = symbol.replace('USDT', '').replace('BUSD', '');
+                const quoteAsset = symbol.endsWith('USDT') ? 'USDT' : symbol.endsWith('BUSD') ? 'BUSD' : '';
 
-                // Si hay fills, calcular la cantidad neta después de comisiones
+                // Solo para BUY: si comisión fue en activo base, esa parte no queda disponible para vender.
                 if (orderData.fills && orderData.fills.length > 0) {
-                    // Verificar si la comisión se cobra en el activo base (ej: BTC en BTCUSDT)
                     const totalCommissionInBase = orderData.fills.reduce((sum, fill) => {
-                        // Extraer el activo base del símbolo (ej: BTC de BTCUSDT)
-                        const baseAsset = orderData.fullResponse?.symbol?.replace('USDT', '').replace('BUSD', '');
-
                         if (fill.commissionAsset === baseAsset) {
-                            // Comisión en el activo base, se resta de la cantidad
                             return sum + Number(fill.commission);
                         }
                         return sum;
                     }, 0);
 
-                    if (totalCommissionInBase > 0) {
-                        netQuantity = netQuantity - totalCommissionInBase;
+                    if (existingMovement.type === MovementType.BUY && totalCommissionInBase > 0) {
+                        netQuantity = Math.max(0, netQuantity - totalCommissionInBase);
                         this.logger.debug(`✅ Comisión en activo base detectada: ${totalCommissionInBase}`);
                         this.logger.debug(`   Cantidad ejecutada: ${orderData.executedQty}`);
                         this.logger.debug(`   Cantidad neta disponible: ${netQuantity}`);
@@ -717,6 +794,70 @@ export class SignalDatabaseService {
 
                 updateData.quantity = netQuantity;
                 this.logger.debug(`✅ Actualizando quantity del movimiento: ${netQuantity}`);
+
+                // Usar monto real ejecutado en quote para evitar diferencias por redondeo/partial fills.
+                const cummulativeQuoteQty = Number(orderData.fullResponse?.cummulativeQuoteQty);
+                let executedQuoteAmount = 0;
+
+                if (isFinite(cummulativeQuoteQty) && !isNaN(cummulativeQuoteQty) && cummulativeQuoteQty > 0) {
+                    executedQuoteAmount = cummulativeQuoteQty;
+                } else if (orderData.fills && orderData.fills.length > 0) {
+                    executedQuoteAmount = orderData.fills.reduce((sum, fill) => {
+                        const price = Number(fill.price);
+                        const qty = Number(fill.qty);
+                        if (!isFinite(price) || isNaN(price) || !isFinite(qty) || isNaN(qty)) {
+                            return sum;
+                        }
+                        return sum + (price * qty);
+                    }, 0);
+                } else if (orderData.price) {
+                    const price = Number(orderData.price);
+                    if (isFinite(price) && !isNaN(price) && price > 0) {
+                        executedQuoteAmount = price * executedQty;
+                    }
+                }
+
+                if (executedQuoteAmount > 0) {
+                    updateData.totalAmount = executedQuoteAmount;
+                    updateData.price = executedQty > 0 ? executedQuoteAmount / executedQty : updateData.price;
+                }
+
+                // Calcular comisión en quote cuando sea posible (USDT/BUSD o comisión en base valorizada por fill).
+                if (orderData.fills && orderData.fills.length > 0) {
+                    const totalCommissionInQuote = orderData.fills.reduce((sum, fill) => {
+                        const commission = Number(fill.commission);
+                        const fillPrice = Number(fill.price);
+                        if (!isFinite(commission) || isNaN(commission)) {
+                            return sum;
+                        }
+
+                        if (fill.commissionAsset === quoteAsset) {
+                            return sum + commission;
+                        }
+
+                        if (fill.commissionAsset === baseAsset && isFinite(fillPrice) && !isNaN(fillPrice)) {
+                            return sum + (commission * fillPrice);
+                        }
+
+                        return sum;
+                    }, 0);
+
+                    if (totalCommissionInQuote > 0) {
+                        updateData.commission = totalCommissionInQuote;
+                    }
+                }
+
+                if (isFinite(updateData.totalAmount) && !isNaN(updateData.totalAmount)) {
+                    const commissionForNet = Number(
+                        isFinite(updateData.commission) && !isNaN(updateData.commission)
+                            ? updateData.commission
+                            : existingMovement.commission
+                    ) || 0;
+
+                    updateData.netAmount = existingMovement.type === MovementType.BUY
+                        ? updateData.totalAmount + commissionForNet
+                        : updateData.totalAmount - commissionForNet;
+                }
             }
         } else if (orderData.status === 'CANCELED') {
             updateData.status = MovementStatus.CANCELLED;

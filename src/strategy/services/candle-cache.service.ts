@@ -6,7 +6,9 @@ import * as indicators from 'src/utils/indicators';
 export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(CandleCacheService.name);
     private redisClient: RedisClientType;
-    private readonly CANDLES_KEY = 'bot:candles';
+    private readonly CANDLES_KEY_PREFIX = 'bot:candles';
+    private readonly DEFAULT_SYMBOL = process.env.BINANCE_SYMBOL || 'BTCUSDT';
+    private readonly DEFAULT_TIMEFRAME_MINUTES = Number(process.env.BINANCE_TIMEFRAME || 1);
     private readonly MAX_CANDLES = 100; // Máximo número de velas a mantener
     private readonly TTL_HOURS = 24; // TTL en horas para las velas
 
@@ -52,29 +54,31 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
     /**
      * Añadir una nueva vela al cache
      */
-    async addCandle(candle: indicators.Candle): Promise<void> {
+    async addCandle(candle: indicators.Candle, symbol?: string, timeframeMinutes?: number): Promise<void> {
         if (!this.isConnected()) {
             this.logger.debug('Redis no conectado - omitiendo cache de vela');
             return;
         }
 
         try {
+            const cacheKey = this.getCandlesKey(symbol, timeframeMinutes);
+
             // Verificar si la vela más antigua ha expirado (más de 24 horas)
-            await this.checkAndClearExpiredCandles();
+            await this.checkAndClearExpiredCandles(cacheKey);
 
             const candleData = JSON.stringify(candle);
 
             // Añadir la vela a la lista (LPUSH para añadir al inicio)
-            await this.redisClient.lPush(this.CANDLES_KEY, candleData);
+            await this.redisClient.lPush(cacheKey, candleData);
 
             // Mantener solo las últimas MAX_CANDLES velas (elimina las más viejas)
-            await this.redisClient.lTrim(this.CANDLES_KEY, 0, this.MAX_CANDLES - 1);
+            await this.redisClient.lTrim(cacheKey, 0, this.MAX_CANDLES - 1);
 
             // Renovar el TTL cada vez que se añade una vela
-            await this.redisClient.expire(this.CANDLES_KEY, this.TTL_HOURS * 3600);
+            await this.redisClient.expire(cacheKey, this.TTL_HOURS * 3600);
 
-            const listLength = await this.redisClient.lLen(this.CANDLES_KEY);
-            this.logger.debug(`📊 Vela añadida al cache: ${candle.close} | Total: ${listLength}/${this.MAX_CANDLES}`);
+            const listLength = await this.redisClient.lLen(cacheKey);
+            this.logger.debug(`📊 Vela añadida al cache ${cacheKey}: ${candle.close} | Total: ${listLength}/${this.MAX_CANDLES}`);
         } catch (error) {
             this.logger.error('Error añadiendo vela al cache:', error);
             // No lanzar error - continuar sin cache
@@ -84,10 +88,10 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
     /**
      * Verificar y limpiar velas expiradas (más antiguas de 24 horas)
      */
-    private async checkAndClearExpiredCandles(): Promise<void> {
+    private async checkAndClearExpiredCandles(cacheKey: string): Promise<void> {
         try {
             // Obtener la vela más antigua (última en la lista)
-            const oldestCandleData = await this.redisClient.lIndex(this.CANDLES_KEY, -1);
+            const oldestCandleData = await this.redisClient.lIndex(cacheKey, -1);
 
             if (!oldestCandleData) {
                 return; // No hay velas
@@ -96,15 +100,15 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
             const oldestCandle = JSON.parse(oldestCandleData) as indicators.Candle;
             if (typeof oldestCandle.timestamp !== 'number') {
                 this.logger.warn('La vela más antigua no tiene timestamp válido, limpiando cache.');
-                await this.clearCandles();
+                await this.clearCandlesByKey(cacheKey);
                 return;
             }
             const candleAge = Date.now() - oldestCandle.timestamp;
             const maxAge = this.TTL_HOURS * 3600 * 1000; // 24 horas en milisegundos
 
             if (candleAge > maxAge) {
-                await this.clearCandles();
-                this.logger.log(`🗑️  Cache limpiado: vela más antigua tenía ${Math.round(candleAge / 3600000)} horas`);
+                await this.clearCandlesByKey(cacheKey);
+                this.logger.log(`🗑️  Cache ${cacheKey} limpiado: vela más antigua tenía ${Math.round(candleAge / 3600000)} horas`);
             }
         } catch (error) {
             this.logger.error('Error verificando velas expiradas:', error);
@@ -114,20 +118,21 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
     /**
      * Obtener todas las velas del cache
      */
-    async getCandles(): Promise<indicators.Candle[]> {
+    async getCandles(symbol?: string, timeframeMinutes?: number): Promise<indicators.Candle[]> {
         if (!this.isConnected()) {
             return [];
         }
 
         try {
-            const candlesData = await this.redisClient.lRange(this.CANDLES_KEY, 0, -1);
+            const cacheKey = this.getCandlesKey(symbol, timeframeMinutes);
+            const candlesData = await this.redisClient.lRange(cacheKey, 0, -1);
 
             // Las velas están en orden inverso (más reciente primero), así que las invertimos
             const candles = candlesData
                 .reverse()
                 .map(data => JSON.parse(data) as indicators.Candle);
 
-            this.logger.debug(`📊 Recuperadas ${candles.length} velas del cache`);
+            this.logger.debug(`📊 Recuperadas ${candles.length} velas del cache ${cacheKey}`);
             return candles;
         } catch (error) {
             this.logger.error('Error obteniendo velas del cache:', error);
@@ -138,20 +143,21 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
     /**
      * Obtener las últimas N velas
      */
-    async getLastCandles(count: number): Promise<indicators.Candle[]> {
+    async getLastCandles(count: number, symbol?: string, timeframeMinutes?: number): Promise<indicators.Candle[]> {
         if (!this.isConnected()) {
             return [];
         }
 
         try {
-            const candlesData = await this.redisClient.lRange(this.CANDLES_KEY, 0, count - 1);
+            const cacheKey = this.getCandlesKey(symbol, timeframeMinutes);
+            const candlesData = await this.redisClient.lRange(cacheKey, 0, count - 1);
 
             // Las velas están en orden inverso, así que las invertimos
             const candles = candlesData
                 .reverse()
                 .map(data => JSON.parse(data) as indicators.Candle);
 
-            this.logger.debug(`📊 Recuperadas últimas ${candles.length} velas del cache`);
+            this.logger.debug(`📊 Recuperadas últimas ${candles.length} velas del cache ${cacheKey}`);
             return candles;
         } catch (error) {
             this.logger.error('Error obteniendo últimas velas del cache:', error);
@@ -162,13 +168,14 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
     /**
      * Obtener el número de velas en cache
      */
-    async getCandleCount(): Promise<number> {
+    async getCandleCount(symbol?: string, timeframeMinutes?: number): Promise<number> {
         if (!this.isConnected()) {
             return 0;
         }
 
         try {
-            return await this.redisClient.lLen(this.CANDLES_KEY);
+            const cacheKey = this.getCandlesKey(symbol, timeframeMinutes);
+            return await this.redisClient.lLen(cacheKey);
         } catch (error) {
             this.logger.error('Error obteniendo count de velas:', error);
             return 0;
@@ -178,18 +185,23 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
     /**
      * Limpiar todas las velas del cache
      */
-    async clearCandles(): Promise<void> {
+    async clearCandles(symbol?: string, timeframeMinutes?: number): Promise<void> {
         if (!this.isConnected()) {
             return;
         }
 
         try {
-            await this.redisClient.del(this.CANDLES_KEY);
-            this.logger.log('🗑️  Cache de velas limpiado');
+            const cacheKey = this.getCandlesKey(symbol, timeframeMinutes);
+            await this.clearCandlesByKey(cacheKey);
+            this.logger.log(`🗑️  Cache de velas limpiado: ${cacheKey}`);
         } catch (error) {
             this.logger.error('Error limpiando cache de velas:', error);
             // No lanzar error
         }
+    }
+
+    private async clearCandlesByKey(cacheKey: string): Promise<void> {
+        await this.redisClient.del(cacheKey);
     }
 
     /**
@@ -206,6 +218,16 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
         candleCount: number;
         isConnected: boolean;
         ttl: number;
+    }>;
+    async getCacheInfo(symbol: string, timeframeMinutes: number): Promise<{
+        candleCount: number;
+        isConnected: boolean;
+        ttl: number;
+    }>;
+    async getCacheInfo(symbol?: string, timeframeMinutes?: number): Promise<{
+        candleCount: number;
+        isConnected: boolean;
+        ttl: number;
     }> {
         if (!this.isConnected()) {
             return {
@@ -216,8 +238,9 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
         }
 
         try {
-            const candleCount = await this.getCandleCount();
-            const ttl = await this.redisClient.ttl(this.CANDLES_KEY);
+            const cacheKey = this.getCandlesKey(symbol, timeframeMinutes);
+            const candleCount = await this.getCandleCount(symbol, timeframeMinutes);
+            const ttl = await this.redisClient.ttl(cacheKey);
 
             return {
                 candleCount,
@@ -232,5 +255,11 @@ export class CandleCacheService implements OnModuleInit, OnModuleDestroy {
                 ttl: -1
             };
         }
+    }
+
+    private getCandlesKey(symbol?: string, timeframeMinutes?: number): string {
+        const normalizedSymbol = (symbol || this.DEFAULT_SYMBOL).toUpperCase();
+        const normalizedTimeframe = timeframeMinutes || this.DEFAULT_TIMEFRAME_MINUTES;
+        return `${this.CANDLES_KEY_PREFIX}:${normalizedSymbol}:${normalizedTimeframe}`;
     }
 }

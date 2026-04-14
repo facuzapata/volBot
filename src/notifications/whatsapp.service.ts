@@ -1,8 +1,11 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
 import { TradeReport } from './interfaces/trade-report.interface';
 import { PositionOpenReport } from './interfaces/position-open-report.interface';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
@@ -10,15 +13,18 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     private client!: Client;
     private isReady = false;
     private readonly WHATSAPP_ENABLED: boolean;
-    private readonly WHATSAPP_NUMBER: string;
+    private readonly WHATSAPP_NUMBER_FALLBACK: string; // Para compatibilidad hacia atrás
 
-    constructor() {
+    constructor(
+        @InjectRepository(User)
+        private userRepository: Repository<User>
+    ) {
         // Leer configuración desde variables de entorno
         this.WHATSAPP_ENABLED = process.env.WHATSAPP_ENABLED === 'true';
-        this.WHATSAPP_NUMBER = process.env.WHATSAPP_NUMBER || '';
+        this.WHATSAPP_NUMBER_FALLBACK = process.env.WHATSAPP_NUMBER || '';
 
-        if (this.WHATSAPP_ENABLED && !this.WHATSAPP_NUMBER) {
-            this.logger.warn('⚠️ WHATSAPP_ENABLED=true pero WHATSAPP_NUMBER no está configurado');
+        if (this.WHATSAPP_ENABLED && !this.WHATSAPP_NUMBER_FALLBACK) {
+            this.logger.warn('⚠️ WHATSAPP_ENABLED=true pero WHATSAPP_NUMBER no está configurado (usá números por usuario)');
         }
     }
 
@@ -104,21 +110,122 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    /**
+     * Envía un reporte de trade a un usuario específico
+     * @param userId ID del usuario
+     * @param report Reporte del trade
+     */
+    async sendTradeReportToUser(userId: string, report: TradeReport): Promise<void> {
+        const message = this.formatTradeMessage(report);
+        await this.sendMessageToUser(userId, message, `Reporte de trading enviado a usuario ${userId}`);
+    }
+
+    /**
+     * Envía un reporte de posición abierta a un usuario específico
+     * @param userId ID del usuario
+     * @param report Reporte de la posición
+     */
+    async sendPositionOpenReportToUser(userId: string, report: PositionOpenReport): Promise<void> {
+        const message = this.formatOpenPositionMessage(report);
+        await this.sendMessageToUser(userId, message, `Reporte de apertura enviado a usuario ${userId}`);
+    }
+
+    /**
+     * Envía una notificación de sistema a un usuario específico
+     * @param userId ID del usuario
+     * @param message Mensaje a enviar
+     */
+    async sendSystemNotificationToUser(userId: string, message: string): Promise<void> {
+        await this.sendMessageToUser(userId, message, `Notificación de sistema enviada a usuario ${userId}`);
+    }
+
+    /**
+     * Método genérico para enviar mensajes a un usuario
+     * Busca el número de WhatsApp en la BD y lo envía
+     * @param userId ID del usuario
+     * @param message Contenido del mensaje
+     * @param logMessage Log de éxito
+     */
+    private async sendMessageToUser(userId: string, message: string, logMessage: string): Promise<void> {
+        if (!this.WHATSAPP_ENABLED) {
+            this.logger.debug('📱 WhatsApp deshabilitado - no se envía mensaje');
+            return;
+        }
+
+        if (!this.isReady) {
+            this.logger.warn('📱 WhatsApp no está listo - mensaje no enviado');
+            return;
+        }
+
+        try {
+            // 1. Obtener el número de WhatsApp del usuario desde BD
+            const user = await this.userRepository.findOne({
+                where: { id: userId }
+            });
+
+            if (!user) {
+                this.logger.warn(`⚠️ Usuario ${userId} no encontrado en BD`);
+                return;
+            }
+
+            if (!user.whatsappNumber) {
+                this.logger.warn(`⚠️ Usuario ${userId} no tiene whatsappNumber configurado`);
+                return;
+            }
+
+            if (!user.whatsappEnabled) {
+                this.logger.debug(`📱 WhatsApp deshabilitado para usuario ${userId}`);
+                return;
+            }
+
+            // 2. Verificar que el cliente esté conectado
+            const state = await this.client.getState();
+            if (state !== 'CONNECTED') {
+                this.logger.warn(`📱 WhatsApp no está completamente conectado para usuario ${userId}`);
+                return;
+            }
+
+            // 3. Formatear el número correctamente
+            let chatId = user.whatsappNumber;
+            if (!chatId.includes('@')) {
+                chatId = `${chatId}@c.us`;
+            }
+
+            // 4. Enviar el mensaje
+            await this.client.sendMessage(chatId, message);
+            this.logger.log(`📱 ${logMessage} (${chatId})`);
+        } catch (error) {
+            this.logger.error(`❌ Error enviando mensaje WhatsApp a usuario ${userId}:`, this.getErrorMessage(error));
+        }
+    }
+
+    /**
+     * LEGACY: Envía reporte de trade (compatibilidad hacia atrás)
+     * @deprecated Usar sendTradeReportToUser() en su lugar
+     */
     async sendTradeReport(report: TradeReport): Promise<void> {
         const message = this.formatTradeMessage(report);
-        await this.sendMessage(message, 'Reporte de trading enviado por WhatsApp');
+        await this.sendMessageLegacy(message, 'Reporte de trading enviado por WhatsApp');
     }
 
+    /**
+     * LEGACY: Envía posición abierta (compatibilidad hacia atrás)
+     * @deprecated Usar sendPositionOpenReportToUser() en su lugar
+     */
     async sendPositionOpenReport(report: PositionOpenReport): Promise<void> {
         const message = this.formatOpenPositionMessage(report);
-        await this.sendMessage(message, 'Reporte de apertura enviado por WhatsApp');
+        await this.sendMessageLegacy(message, 'Reporte de apertura enviado por WhatsApp');
     }
 
+    /**
+     * LEGACY: Envía notificación de sistema (compatibilidad hacia atrás)
+     * @deprecated Usar sendSystemNotificationToUser() en su lugar
+     */
     async sendSystemNotification(message: string): Promise<void> {
-        await this.sendMessage(message, 'Notificación de sistema enviada por WhatsApp');
+        await this.sendMessageLegacy(message, 'Notificación de sistema enviada por WhatsApp');
     }
 
-    private async sendMessage(message: string, successLog: string): Promise<void> {
+    private async sendMessageLegacy(message: string, successLog: string): Promise<void> {
         if (!this.WHATSAPP_ENABLED) {
             this.logger.debug('📱 WhatsApp deshabilitado - no se envía reporte');
             return;
@@ -129,8 +236,8 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
             return;
         }
 
-        if (!this.WHATSAPP_NUMBER) {
-            this.logger.warn('📱 Número de WhatsApp no configurado');
+        if (!this.WHATSAPP_NUMBER_FALLBACK) {
+            this.logger.warn('📱 Número de WhatsApp (fallback) no configurado');
             return;
         }
 
@@ -143,7 +250,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
             }
 
             // Formatear el número correctamente
-            let chatId = this.WHATSAPP_NUMBER;
+            let chatId = this.WHATSAPP_NUMBER_FALLBACK;
             if (!chatId.includes('@')) {
                 chatId = `${chatId}@c.us`;
             }
@@ -158,9 +265,10 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     private formatTradeMessage(report: TradeReport): string {
         const mode = report.paperTrading ? '📝 PAPER TRADING' : '💰 TRADING REAL';
         const profitEmoji = report.netProfit > 0 ? '💚' : '❌';
-        const profitText = report.netProfit > 0 ? 'GANANCIA' : 'PÉRDIDA';
+        const profitText = report.stoppedByStopLoss ? 'STOP LOSS' : (report.netProfit > 0 ? 'GANANCIA' : 'PÉRDIDA');
+        const titleEmoji = report.stoppedByStopLoss ? '🛑' : '🤖';
 
-        return `🤖 *VolBot - Trading Report*
+        return `${titleEmoji} *VolBot - Trading Report*
 
 ${mode}
 
@@ -249,7 +357,7 @@ ${report.openedAt.toLocaleString('es-ES', {
 
         try {
             // Formatear el número correctamente
-            let chatId = this.WHATSAPP_NUMBER;
+            let chatId = this.WHATSAPP_NUMBER_FALLBACK;
             if (!chatId.includes('@')) {
                 chatId = `${chatId}@c.us`;
             }

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,6 +11,8 @@ import { Signal, SignalStatus } from '../entities/signal.entity';
 import { MovementType, MovementStatus } from '../entities/movement.entity';
 import { TelegramService } from '../../notifications/telegram.service';
 import { WhatsAppService } from '../../notifications/whatsapp.service';
+import { BinanceMultiWsService } from '../../binance/services/binance-multi-ws.service';
+import { AiAnalysisService } from './ai-analysis.service';
 import * as indicators from '../../utils/indicators';
 
 interface UserStrategyConfig {
@@ -42,8 +44,11 @@ export class MultiUserStrategyService implements OnModuleInit {
         private readonly signalDbService: SignalDatabaseService,
         private readonly candleCacheService: CandleCacheService,
         private readonly multiBinanceService: MultiBinanceService,
+        @Inject(forwardRef(() => BinanceMultiWsService))
+        private readonly binanceMultiWsService: BinanceMultiWsService,
         private readonly telegramService: TelegramService,
         private readonly whatsappService: WhatsAppService,
+        private readonly aiAnalysisService: AiAnalysisService,
         @InjectRepository(User)
         private userRepository: Repository<User>
     ) {
@@ -53,8 +58,25 @@ export class MultiUserStrategyService implements OnModuleInit {
     async onModuleInit() {
         const tradingMode = this.PAPER_TRADING ? 'PAPER TRADING' : 'TRADING REAL';
         this.logger.log(`🚀 Estrategia multi-usuario inicializada - Modo: ${tradingMode}`);
+
+        // Enlazar callback para recibir velas cerradas desde BinanceMultiWsService.
+        this.binanceMultiWsService.setCallback(this);
+        this.logger.log('🔗 Callback de estrategia registrado en BinanceMultiWsService');
+
         await this.loadActiveUsers();
         await this.sendStartupNotification();
+    }
+
+    /**
+     * Normaliza márgenes a formato fracción.
+     * Soporta tanto 3 (3%) como 0.03 (3%).
+     */
+    private normalizeMargin(rawMargin: number): number {
+        if (!Number.isFinite(rawMargin) || rawMargin < 0) {
+            return 0;
+        }
+
+        return rawMargin > 1 ? rawMargin / 100 : rawMargin;
     }
 
     private async loadActiveUsers() {
@@ -65,13 +87,16 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.log(`📥 Cargando configuración para ${activeUsers.length} usuarios activos...`);
 
         for (const user of activeUsers) {
+            const normalizedProfitMargin = this.normalizeMargin(Number(user.profitMargin));
+            const normalizedSellMargin = this.normalizeMargin(Number(user.sellMargin));
+
             const config: UserStrategyConfig = {
                 userId: user.id,
                 userEmail: user.email,
                 capitalForSignals: Number(user.capitalForSignals),
                 capitalPerTrade: Number(user.capitalPerTrade),
-                profitMargin: Number(user.profitMargin),
-                sellMargin: Number(user.sellMargin),
+                profitMargin: normalizedProfitMargin,
+                sellMargin: normalizedSellMargin,
                 maxActiveSignals: user.maxActiveSignals,
                 dailySignalCount: 0,
                 lastResetDate: new Date().toDateString()
@@ -81,8 +106,8 @@ export class MultiUserStrategyService implements OnModuleInit {
             this.logger.log(`✅ Configuración cargada para usuario ${user.email}:`);
             this.logger.log(`   💰 Capital por trade: ${config.capitalPerTrade} USDT`);
             this.logger.log(`   📊 Max señales activas: ${config.maxActiveSignals}`);
-            this.logger.log(`   🎯 Profit margin: ${config.profitMargin}%`);
-            this.logger.log(`   🛑 Stop loss margin: ${config.sellMargin}%`);
+            this.logger.log(`   🎯 Profit margin: ${(config.profitMargin * 100).toFixed(2)}%`);
+            this.logger.log(`   🛑 Stop loss margin: ${(config.sellMargin * 100).toFixed(2)}%`);
         }
     }
 
@@ -90,67 +115,69 @@ export class MultiUserStrategyService implements OnModuleInit {
         try {
             const startupTime = new Date();
             const tradingMode = this.PAPER_TRADING ? 'PAPER TRADING' : 'TRADING REAL';
-            const activeConfigs = Array.from(this.userConfigs.values());
+            const startupDateTime = startupTime.toLocaleString('es-AR', {
+                timeZone: 'America/Argentina/Buenos_Aires',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
 
-            const lines: string[] = [
-                '🤖 <b>Tu bot esta iniciado</b>',
-                `⏰ <b>Hora:</b> ${startupTime.toLocaleString('es-AR', {
-                    timeZone: 'America/Argentina/Buenos_Aires',
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                })}`,
-                `📌 <b>Modo:</b> ${tradingMode}`,
-                `👥 <b>Usuarios activos:</b> ${activeConfigs.length}`,
-                ''
-            ];
+            // Enviar notificación a CADA usuario
+            for (const [userId, config] of this.userConfigs.entries()) {
+                const userMessage = [
+                    '🤖 <b>Tu bot esta iniciado</b>',
+                    `⏰ <b>Hora:</b> ${startupDateTime}`,
+                    `📌 <b>Modo:</b> ${tradingMode}`,
+                    '',
+                    `👤 <b>Usuario:</b> ${config.userEmail}`,
+                    `💰 Capital total: ${config.capitalForSignals} USDT`,
+                    `💸 Capital por trade: ${config.capitalPerTrade} USDT`,
+                    `📊 Max señales activas: ${config.maxActiveSignals}`,
+                    `🎯 Profit margin: ${(config.profitMargin * 100).toFixed(2)}%`,
+                    `🛑 Stop loss margin: ${(config.sellMargin * 100).toFixed(2)}%`,
+                    '',
+                    '✅ El sistema está monitoreando BTC/USDT en 1m'
+                ].join('\n');
 
-            for (const config of activeConfigs) {
-                const userLabel = config.userEmail || config.userId;
+                const whatsappMessage = userMessage
+                    .replace(/<b>/g, '*')
+                    .replace(/<\/b>/g, '*');
 
-                lines.push(`👤 <b>Usuario:</b> ${userLabel}`);
-                lines.push(`💰 Capital por trade: ${config.capitalPerTrade} USDT`);
-                lines.push(`📊 Max señales activas: ${config.maxActiveSignals}`);
-                lines.push(`🎯 Profit margin: ${config.profitMargin}%`);
-                lines.push(`🛑 Stop loss margin: ${config.sellMargin}%`);
-                lines.push('');
+                try {
+                    await Promise.allSettled([
+                        this.telegramService.sendSystemNotificationToUser(userId, userMessage),
+                        this.whatsappService.sendSystemNotificationToUser(userId, whatsappMessage)
+                    ]);
+                } catch (error) {
+                    this.logger.warn(`⚠️ Error enviando startup notification a usuario ${config.userEmail}:`, error);
+                }
             }
 
-            const telegramMessage = lines.join('\n').trim();
-            const whatsappMessage = telegramMessage
-                .replace(/<b>/g, '*')
-                .replace(/<\/b>/g, '*');
-
-            await Promise.allSettled([
-                this.telegramService.sendSystemNotification(telegramMessage),
-                this.whatsappService.sendSystemNotification(whatsappMessage)
-            ]);
-
-            this.logger.log('📲 Notificación de inicio enviada por Telegram/WhatsApp');
+            this.logger.log('📲 Notificaciones de inicio enviadas a todos los usuarios');
         } catch (error) {
-            this.logger.error('❌ Error enviando notificación de inicio:', this.getErrorMessage(error));
+            this.logger.error('❌ Error en sendStartupNotification:', this.getErrorMessage(error));
         }
     }
 
-    async processCandle(candle: indicators.Candle) {
+    async processCandle(candle: indicators.Candle, symbol = 'BTCUSDT', timeframeMinutes = 1) {
         // Resetear contadores diarios para todos los usuarios
         this.resetDailyCounters();
 
         // Añadir vela al cache de Redis
-        await this.candleCacheService.addCandle(candle);
+        await this.candleCacheService.addCandle(candle, symbol, timeframeMinutes);
 
-        const cacheInfo = await this.candleCacheService.getCacheInfo();
+        const cacheInfo = await this.candleCacheService.getCacheInfo(symbol, timeframeMinutes);
 
         if (cacheInfo.candleCount < 50) {
-            this.logger.debug(`📊 Esperando más velas para análisis técnico: ${cacheInfo.candleCount}/50`);
+            this.logger.debug(`📊 [${symbol} ${timeframeMinutes}m] Esperando más velas para análisis técnico: ${cacheInfo.candleCount}/50`);
             return;
         }
 
         // Obtener velas del cache
-        const candles = await this.candleCacheService.getCandles();
+        const candles = await this.candleCacheService.getCandles(symbol, timeframeMinutes);
         const closes = candles.map((c) => c.close);
         const highs = candles.map((c) => c.high);
         const lows = candles.map((c) => c.low);
@@ -175,7 +202,7 @@ export class MultiUserStrategyService implements OnModuleInit {
 
         // Procesar estrategia para cada usuario activo
         for (const [userId, userConfig] of this.userConfigs.entries()) {
-            await this.processUserStrategy(userId, userConfig, candle, indicators, candles);
+            await this.processUserStrategy(userId, userConfig, candle, indicators, candles, symbol, timeframeMinutes);
         }
 
         this.lastCandle = candle;
@@ -186,7 +213,9 @@ export class MultiUserStrategyService implements OnModuleInit {
         userConfig: UserStrategyConfig,
         candle: indicators.Candle,
         techIndicators: any,
-        candles: indicators.Candle[]
+        candles: indicators.Candle[],
+        symbol: string,
+        timeframeMinutes: number
     ) {
         try {
             if (userConfig.dailySignalCount >= this.maxDailySignalsDefault) return;
@@ -242,7 +271,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                         const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(sellPendingMovement.binanceOrderId), userId);
                         if (orderStatus.status === 'FILLED') {
                             await this.signalDbService.updateMovementStatus(sellPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
-                            await this.signalDbService.updateStatusSignal(signal.id, SignalStatus.MATCHED);
+                            await this.tryCreateResidualSellForSignal(userId, userConfig, signal.id, signal.symbol, candle.close);
                             this.logger.debug(`💰 [Usuario ${userId}] SELL completado para ${signal.symbol}`);
                         }
                     } catch (error) {
@@ -266,7 +295,9 @@ export class MultiUserStrategyService implements OnModuleInit {
                 activeSignals,
                 candles,
                 canCreateNewSignals,
-                hasPendingSell
+                hasPendingSell,
+                symbol,
+                timeframeMinutes
             );
 
         } catch (error) {
@@ -282,7 +313,9 @@ export class MultiUserStrategyService implements OnModuleInit {
         activeSignals: Signal[],
         candles: indicators.Candle[],
         canCreateNewSignals: boolean,
-        hasPendingSell: boolean // 👈 nuevo
+        hasPendingSell: boolean, // 👈 nuevo
+        symbol: string,
+        timeframeMinutes: number
     ) {
         const {
             smaShort, smaLong, smaVeryLong, emaShort, emaLong, rsi, macd, atr, bbands, volumeMA, currentVolume
@@ -325,7 +358,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                 smaShort,
                 smaLong,
                 currentVolume
-            });
+            }, symbol, timeframeMinutes, candles);
         }
 
         // 🔴 Las órdenes de venta se crean automáticamente después de la compra
@@ -353,7 +386,10 @@ export class MultiUserStrategyService implements OnModuleInit {
         userId: string,
         userConfig: UserStrategyConfig,
         candle: indicators.Candle,
-        analysis: any
+        analysis: any,
+        symbol: string,
+        timeframeMinutes: number,
+        candles: indicators.Candle[]
     ) {
         const {
             isStrongUptrend, isRangeMarket, rsi, latestMACD, latestSignal, latestHistogram,
@@ -391,8 +427,55 @@ export class MultiUserStrategyService implements OnModuleInit {
         // Necesitamos al menos 5 de 7 condiciones para generar señal
         if (passedConditions >= 5) {
             if (await this.validateSignalSafetyForUser(userId, 'buy', candle.close, atr)) {
+                const stopLoss = candle.close * (1 - userConfig.sellMargin);
+                const takeProfit = candle.close * (1 + userConfig.profitMargin);
+                const rawPositionSize = userConfig.capitalPerTrade / candle.close;
+                const positionSize = Math.max(0.00001, Math.floor(rawPositionSize / 0.00001) * 0.00001);
+
+                const aiDecision = await this.aiAnalysisService.evaluateBuySignal({
+                    userId,
+                    userEmail: userConfig.userEmail,
+                    symbol,
+                    timeframeMinutes,
+                    currentPrice: candle.close,
+                    stopLoss,
+                    takeProfit,
+                    positionSize,
+                    indicators: {
+                        rsi,
+                        latestMACD,
+                        latestSignal,
+                        latestHistogram,
+                        atr,
+                        smaShort,
+                        smaLong,
+                        currentVolume,
+                        isStrongUptrend,
+                        isRangeMarket,
+                        bullishEngulfing,
+                        priceNearBBLower,
+                        volumeConfirmation
+                    },
+                    recentCandles: candles.slice(-30).map((entry) => ({
+                        open: entry.open,
+                        high: entry.high,
+                        low: entry.low,
+                        close: entry.close,
+                        volume: entry.volume
+                    }))
+                });
+
+                if (!aiDecision.approved) {
+                    this.logger.warn(`🤖 [Usuario ${userId}] COMPRA bloqueada por IA (${aiDecision.source}): ${aiDecision.reason}`);
+                    return;
+                }
+
+                if (!aiDecision.skipped) {
+                    this.logger.log(`🤖 [Usuario ${userId}] IA aprobó compra (${aiDecision.source})${aiDecision.confidence !== null ? ` conf=${aiDecision.confidence.toFixed(3)}` : ''}`);
+                }
+
                 this.logger.log(`🟢 [Usuario ${userId}] GENERANDO SEÑAL DE COMPRA a ${candle.close}`);
-                await this.createBuySignalForUser(userId, userConfig, candle, atr, smaShort, smaLong, rsi, latestMACD, currentVolume);
+                await this.createBuySignalForUser(userId, userConfig, candle, atr, smaShort, smaLong, rsi, latestMACD, currentVolume, symbol);
             }
         }
     }
@@ -445,11 +528,12 @@ export class MultiUserStrategyService implements OnModuleInit {
         smaLong: number,
         rsi: number,
         macd: number,
-        volume: number
+        volume: number,
+        symbol: string
     ) {
-        // Usar los márgenes configurados por el usuario (en porcentaje)
-        const takeProfitPercent = userConfig.profitMargin / 100; // ej: 3 -> 0.03 (3%)
-        const stopLossPercent = userConfig.sellMargin / 100; // ej: 3 -> 0.03 (3%)
+        // Usar los márgenes configurados por el usuario en formato fracción.
+        const takeProfitPercent = userConfig.profitMargin;
+        const stopLossPercent = userConfig.sellMargin;
 
         const stopLoss = candle.close * (1 - stopLossPercent);
         const takeProfit = candle.close * (1 + takeProfitPercent);
@@ -483,7 +567,7 @@ export class MultiUserStrategyService implements OnModuleInit {
 
         // Crear señal en base de datos con userId
         const signal = await this.signalDbService.createSignalForUser(userId, {
-            symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
+            symbol,
             initialPrice: candle.close,
             stopLoss,
             takeProfit,
@@ -532,7 +616,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         if (!this.PAPER_TRADING) {
             try {
                 await this.multiBinanceService.createOrderForUser(userId, {
-                    symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
+                    symbol,
                     side: 'BUY',
                     type: 'MARKET',
                     quantity: positionSize
@@ -551,7 +635,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.log(`🟢 [Usuario ${userId}] SEÑAL DE COMPRA creada: ${candle.close} | Size: ${positionSize.toFixed(4)}`);
 
         // Emitir evento
-        this.emitTradeSignalForUser(userId, 'buy', candle.close, atr, signal.id);
+        this.emitTradeSignalForUser(userId, 'buy', candle.close, atr, signal.id, undefined, signal.symbol);
     }
 
     private async createSellSignalForUser(
@@ -624,8 +708,11 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.debug(`  💰 Comisión estimada: ${commission}`);
         this.logger.debug(`  💰 Neto estimado: ${netAmount}`);
 
-        // Crear movimiento de venta
-        const sellMovement = await this.signalDbService.createMovement({
+        const stopLossPercent = userStrategyConfig.sellMargin; // ej: 0.005 = 0.5%
+        const useOCO = !this.PAPER_TRADING && stopLossPercent > 0;
+
+        // Crear movimiento TP (take profit)
+        const tpMovement = await this.signalDbService.createMovement({
             signalId: signal.id,
             type: MovementType.SELL,
             price: sellPrice,
@@ -639,7 +726,7 @@ export class MultiUserStrategyService implements OnModuleInit {
             userId,
             userConfig: userStrategyConfig,
             side: 'SELL',
-            orderType: 'LIMIT',
+            orderType: useOCO ? 'OCO' : 'LIMIT',
             signalId: signal.id,
             symbol: signal.symbol,
             price: Number(sellPrice),
@@ -648,21 +735,54 @@ export class MultiUserStrategyService implements OnModuleInit {
             commission,
             stopLoss: Number(signal.stopLoss),
             takeProfit: Number(signal.takeProfit),
-            movementStatus: sellMovement.status,
+            movementStatus: tpMovement.status,
             paperTrading: this.PAPER_TRADING
         });
 
-        // Ejecutar orden si no es paper trading
+        // Ejecutar orden
         if (!this.PAPER_TRADING) {
             try {
-                await this.multiBinanceService.createOrderForUser(userId, {
-                    symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
-                    side: 'SELL',
-                    type: 'LIMIT',
-                    quantity: sellQuantity,
-                    price: sellPrice,
-                    timeInForce: 'GTC'
-                }, sellMovement.id); // Pasar el ID del movimiento para actualizar con datos de Binance
+                if (useOCO) {
+                    // Precio de stop: precio de compra menos sellMargin
+                    const buyPrice = Number(signal.initialPrice);
+                    const stopPrice = buyPrice * (1 - stopLossPercent);
+                    // stopLimitPrice 0.1% debajo del trigger para asegurar fill
+                    const stopLimitPrice = stopPrice * 0.999;
+
+                    // Crear movimiento SL en DB
+                    const slTotalAmount = stopPrice * sellQuantity;
+                    const slCommission = slTotalAmount * this.COMMISSION;
+                    const slMovement = await this.signalDbService.createMovement({
+                        signalId: signal.id,
+                        type: MovementType.SELL,
+                        price: stopPrice,
+                        quantity: sellQuantity,
+                        totalAmount: slTotalAmount,
+                        commission: slCommission,
+                        netAmount: slTotalAmount - slCommission
+                    });
+
+                    this.logger.log(`🛑 [Usuario ${userId}] OCO: TP=${Number(sellPrice).toFixed(2)} SL_trigger=${stopPrice.toFixed(2)} SL_limit=${stopLimitPrice.toFixed(2)}`);
+
+                    await this.multiBinanceService.createOCOOrderForUser(userId, {
+                        symbol: signal.symbol,
+                        side: 'SELL',
+                        quantity: sellQuantity,
+                        price: Number(sellPrice),
+                        stopPrice,
+                        stopLimitPrice,
+                        stopLimitTimeInForce: 'GTC'
+                    }, tpMovement.id, slMovement.id);
+                } else {
+                    await this.multiBinanceService.createOrderForUser(userId, {
+                        symbol: signal.symbol,
+                        side: 'SELL',
+                        type: 'LIMIT',
+                        quantity: sellQuantity,
+                        price: sellPrice,
+                        timeInForce: 'GTC'
+                    }, tpMovement.id);
+                }
             } catch (error) {
                 this.logger.error(`❌ [Usuario ${userId}] Error ejecutando orden de venta:`, error);
             }
@@ -674,13 +794,172 @@ export class MultiUserStrategyService implements OnModuleInit {
             userConfigEntry.dailySignalCount++;
         }
 
-        this.logger.log(`🔴 [Usuario ${userId}] SEÑAL DE VENTA creada para señal ${signal.id}`);
+        this.logger.log(`🔴 [Usuario ${userId}] SEÑAL DE VENTA creada para señal ${signal.id} (${useOCO ? 'OCO TP+SL' : 'LIMIT'})`);
 
         // Emitir evento
-        this.emitTradeSignalForUser(userId, 'sell', candle.close, atr, signal.id, sellQuantity);
+        this.emitTradeSignalForUser(userId, 'sell', candle.close, atr, signal.id, sellQuantity, signal.symbol);
     }
 
-    private emitTradeSignalForUser(userId: string, side: 'buy' | 'sell', price: number, atr: number, signalId: string, netQuantity?: number) {
+
+    private async tryCreateResidualSellForSignal(
+        userId: string,
+        userConfig: UserStrategyConfig,
+        signalId: string,
+        symbol: string,
+        referencePrice: number
+    ): Promise<void> {
+        try {
+            const signal = await this.signalDbService.getSignalById(signalId);
+            if (!signal) return;
+
+            const buyMovements = signal.movements.filter(m => m.type === MovementType.BUY && m.status === MovementStatus.FILLED);
+            const sellMovements = signal.movements.filter(m => m.type === MovementType.SELL && m.status === MovementStatus.FILLED);
+            const pendingSell = signal.movements.some(m => m.type === MovementType.SELL && m.status === MovementStatus.PENDING);
+
+            if (buyMovements.length === 0 || pendingSell) {
+                return;
+            }
+
+            const totalBoughtQty = buyMovements.reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
+            const totalSoldQty = sellMovements.reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
+            const residualQtyRaw = Math.max(0, totalBoughtQty - totalSoldQty);
+
+            const stepSize = symbol === 'BTCUSDT' ? 0.00001 : 0.00000001;
+            const minQty = symbol === 'BTCUSDT' ? 0.00001 : stepSize;
+            const residualSellQty = Math.floor(residualQtyRaw / stepSize) * stepSize;
+            const minNotional = Number(process.env.BINANCE_MIN_NOTIONAL || 5);
+            const residualNotional = residualSellQty * referencePrice;
+
+            if (residualSellQty < minQty) {
+                if (residualQtyRaw > 0) {
+                    this.logger.debug(`🧾 [Usuario ${userId}] Residual no vendible para ${signalId}: ${residualQtyRaw.toFixed(8)} (${symbol})`);
+                    await this.notifyResidualNotSellable(
+                        userId,
+                        userConfig,
+                        signalId,
+                        symbol,
+                        residualQtyRaw,
+                        referencePrice,
+                        'LOT_SIZE/MIN_QTY'
+                    );
+                }
+                return;
+            }
+
+            if (residualNotional < minNotional) {
+                this.logger.debug(`🧾 [Usuario ${userId}] Residual bajo MIN_NOTIONAL para ${signalId}: qty=${residualSellQty.toFixed(8)} notional=${residualNotional.toFixed(4)} < ${minNotional}`);
+                await this.notifyResidualNotSellable(
+                    userId,
+                    userConfig,
+                    signalId,
+                    symbol,
+                    residualSellQty,
+                    referencePrice,
+                    `MIN_NOTIONAL ${minNotional} USDT`
+                );
+                return;
+            }
+
+            this.logger.log(`♻️ [Usuario ${userId}] Creando venta residual automática para ${signalId}: qty=${residualSellQty.toFixed(8)} ${symbol}`);
+
+            const totalAmount = referencePrice * residualSellQty;
+            const commission = totalAmount * this.COMMISSION;
+            const netAmount = totalAmount - commission;
+
+            const residualMovement = await this.signalDbService.createMovement({
+                signalId,
+                type: MovementType.SELL,
+                price: referencePrice,
+                quantity: residualSellQty,
+                totalAmount,
+                commission,
+                netAmount
+            });
+
+            await this.notifyOrderCreated({
+                userId,
+                userConfig,
+                side: 'SELL',
+                orderType: 'MARKET',
+                signalId,
+                symbol,
+                price: referencePrice,
+                quantity: residualSellQty,
+                totalAmount,
+                commission,
+                stopLoss: Number(signal.stopLoss),
+                takeProfit: Number(signal.takeProfit),
+                movementStatus: residualMovement.status,
+                paperTrading: this.PAPER_TRADING
+            });
+
+            if (!this.PAPER_TRADING) {
+                await this.multiBinanceService.createOrderForUser(userId, {
+                    symbol,
+                    side: 'SELL',
+                    type: 'MARKET',
+                    quantity: residualSellQty
+                }, residualMovement.id);
+            }
+        } catch (error) {
+            this.logger.error(`❌ [Usuario ${userId}] Error creando venta residual automática:`, this.getErrorMessage(error));
+        }
+    }
+
+    private async notifyResidualNotSellable(
+        userId: string,
+        userConfig: UserStrategyConfig,
+        signalId: string,
+        symbol: string,
+        quantity: number,
+        referencePrice: number,
+        reason: string
+    ): Promise<void> {
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+            return;
+        }
+
+        const amount = quantity * referencePrice;
+        const asset = symbol.replace('USDT', '').replace('BUSD', '');
+        const mode = this.PAPER_TRADING ? 'PAPER TRADING' : 'TRADING REAL';
+        const timeText = new Date().toLocaleString('es-AR', {
+            timeZone: 'America/Argentina/Buenos_Aires',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        const telegramMessage = [
+            '🧾 <b>Residual No Vendible Automáticamente</b>',
+            '',
+            `👤 <b>Usuario:</b> ${userConfig.userEmail || userId}`,
+            `📌 <b>Modo:</b> ${mode}`,
+            `📈 <b>Par:</b> ${symbol}`,
+            `🔗 <b>Signal ID:</b> ${signalId.substring(0, 8)}...`,
+            '',
+            `📦 <b>Residual:</b> ${quantity.toFixed(8)} ${asset}`,
+            `💵 <b>Valor est.:</b> $${amount.toFixed(4)} USDT`,
+            `⚠️ <b>Motivo:</b> ${reason}`,
+            '',
+            'ℹ️ El bot lo contempla en el P&L de cierre. Si querés limpiarlo, podés usar Convert Dust de Binance.',
+            '',
+            `🕒 ${timeText}`
+        ].join('\n');
+
+        const whatsappMessage = telegramMessage
+            .replace(/<b>/g, '*')
+            .replace(/<\/b>/g, '*');
+
+        await Promise.allSettled([
+            this.telegramService.sendSystemNotificationToUser(userId, telegramMessage),
+            this.whatsappService.sendSystemNotificationToUser(userId, whatsappMessage)
+        ]);
+    }
+
+    private emitTradeSignalForUser(userId: string, side: 'buy' | 'sell', price: number, atr: number, signalId: string, netQuantity?: number, symbol?: string) {
         const userConfig = this.userConfigs.get(userId);
         if (!userConfig) return;
 
@@ -700,7 +979,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         const tradeSignal: TradeSignal & { userId: string } = {
             id: signalId,
             userId,
-            symbol: process.env.BINANCE_SYMBOL || 'BTCUSDT',
+            symbol: symbol || process.env.BINANCE_SYMBOL || 'BTCUSDT',
             price,
             size: positionSize,
             stopLoss,
@@ -729,7 +1008,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         userId: string;
         userConfig: UserStrategyConfig;
         side: 'BUY' | 'SELL';
-        orderType: 'MARKET' | 'LIMIT';
+        orderType: 'MARKET' | 'LIMIT' | 'OCO';
         signalId: string;
         symbol: string;
         price: number;
@@ -780,8 +1059,8 @@ export class MultiUserStrategyService implements OnModuleInit {
             .replace(/<\/b>/g, '*');
 
         await Promise.allSettled([
-            this.telegramService.sendSystemNotification(telegramMessage),
-            this.whatsappService.sendSystemNotification(whatsappMessage)
+            this.telegramService.sendSystemNotificationToUser(payload.userId, telegramMessage),
+            this.whatsappService.sendSystemNotificationToUser(payload.userId, whatsappMessage)
         ]);
 
         this.logger.log(`📲 [Usuario ${payload.userId}] Notificación de orden ${payload.side} enviada`);
@@ -849,8 +1128,8 @@ export class MultiUserStrategyService implements OnModuleInit {
             userEmail: user.email,
             capitalForSignals: Number(user.capitalForSignals),
             capitalPerTrade: Number(user.capitalPerTrade),
-            profitMargin: Number(user.profitMargin),
-            sellMargin: Number(user.sellMargin),
+            profitMargin: this.normalizeMargin(Number(user.profitMargin)),
+            sellMargin: this.normalizeMargin(Number(user.sellMargin)),
             maxActiveSignals: user.maxActiveSignals,
             dailySignalCount: 0,
             lastResetDate: new Date().toDateString()
@@ -881,8 +1160,8 @@ export class MultiUserStrategyService implements OnModuleInit {
             userEmail: user.email,
             capitalForSignals: Number(user.capitalForSignals),
             capitalPerTrade: Number(user.capitalPerTrade),
-            profitMargin: Number(user.profitMargin),
-            sellMargin: Number(user.sellMargin),
+            profitMargin: this.normalizeMargin(Number(user.profitMargin)),
+            sellMargin: this.normalizeMargin(Number(user.sellMargin)),
             maxActiveSignals: user.maxActiveSignals,
             dailySignalCount: this.userConfigs.get(userId)?.dailySignalCount || 0,
             lastResetDate: this.userConfigs.get(userId)?.lastResetDate || new Date().toDateString()
@@ -892,8 +1171,8 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.log(`🔄 Configuración recargada para usuario ${user.email}:`);
         this.logger.log(`   💰 Capital por trade: ${config.capitalPerTrade} USDT`);
         this.logger.log(`   📊 Max señales activas: ${config.maxActiveSignals}`);
-        this.logger.log(`   🎯 Profit margin: ${config.profitMargin}%`);
-        this.logger.log(`   🛑 Stop loss margin: ${config.sellMargin}%`);
+        this.logger.log(`   🎯 Profit margin: ${(config.profitMargin * 100).toFixed(2)}%`);
+        this.logger.log(`   🛑 Stop loss margin: ${(config.sellMargin * 100).toFixed(2)}%`);
     }
 
     private getErrorMessage(error: unknown): string {

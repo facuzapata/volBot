@@ -17,52 +17,55 @@ export enum MovementStatus {
 export class Movement {
 
     @PrimaryGeneratedColumn('uuid')
-    id: string;
+    id!: string;
 
     @Column({ type: 'enum', enum: MovementType })
-    type: MovementType;
+    type!: MovementType;
 
     @Column({ type: 'enum', enum: MovementStatus, default: MovementStatus.PENDING })
-    status: MovementStatus;
+    status!: MovementStatus;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    price: number;
+    price!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    quantity: number;
+    quantity!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    totalAmount: number;
+    totalAmount!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    commission: number;
+    commission!: number;
 
     @Column({ type: 'decimal', precision: 18, scale: 8 })
-    netAmount: number;
+    netAmount!: number;
 
     // Datos de auditoría de Binance
     @Column({ type: 'varchar', length: 50, nullable: true })
-    binanceOrderId: string;
+    binanceOrderId!: string;
 
     @Column({ type: 'varchar', length: 50, nullable: true })
-    binanceClientOrderId: string;
+    binanceOrderListId!: string; // Para OCO: agrupa el TP y el SL
+
+    @Column({ type: 'varchar', length: 50, nullable: true })
+    binanceClientOrderId!: string;
 
     @Column({ type: 'jsonb', nullable: true })
-    binanceResponse: any;
+    binanceResponse!: any;
 
     @Column({ type: 'jsonb', nullable: true })
-    binanceError: any;
+    binanceError!: any;
 
     @Column({ type: 'timestamp', nullable: true })
-    executedAt: Date;
+    executedAt!: Date;
 
     @CreateDateColumn()
-    createdAt: Date;
+    createdAt!: Date;
 
     @ManyToOne(() => Signal, signal => signal.movements)
     @JoinColumn({ name: 'signal_id' })
-    signal: Signal;
+    signal!: Signal;
 
     @Column({ name: 'signal_id' })
-    signalId: string;
+    signalId!: string;
 }

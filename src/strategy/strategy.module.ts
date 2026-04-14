@@ -1,9 +1,9 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { StrategyService } from './services/strategy.service';
 import { MultiUserStrategyService } from './services/multi-user-strategy.service';
 import { SignalDatabaseService } from './services/signal-database.service';
 import { CandleCacheService } from './services/candle-cache.service';
+import { AiAnalysisService } from './services/ai-analysis.service';
 import { BinanceModule } from 'src/binance/binance.module';
 import { Signal, Movement } from './entities';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -17,21 +17,16 @@ import { UserCredentials } from '../users/entities/user-credentials.entity';
     NotificationsModule
   ],
   providers: [
-    // Original service (commented for backup)
-    // StrategyService,
-
-    // New multi-user service
     MultiUserStrategyService,
-
-    // Shared services
     SignalDatabaseService,
-    CandleCacheService
+    CandleCacheService,
+    AiAnalysisService
   ],
   exports: [
-    // StrategyService, // Original service
-    MultiUserStrategyService, // New multi-user service
+    MultiUserStrategyService,
     SignalDatabaseService,
-    CandleCacheService
+    CandleCacheService,
+    AiAnalysisService
   ],
 })
 export class StrategyModule { }

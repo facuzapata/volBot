@@ -13,4 +13,5 @@ export interface TradeReport {
     roi: number;
     duration: string;
     paperTrading: boolean;
+    stoppedByStopLoss: boolean;
 }

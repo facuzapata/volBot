@@ -8,6 +8,7 @@ import { StrategyModule } from './strategy/strategy.module';
 import { TradingModule } from './traiding/trading.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { UsersModule } from './users/users.module'; // New multi-user module
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { UsersModule } from './users/users.module'; // New multi-user module
     StrategyModule,
     TradingModule,
     NotificationsModule,
+    AuthModule,
     UsersModule, // Add users module for multi-user support
   ],
 })
