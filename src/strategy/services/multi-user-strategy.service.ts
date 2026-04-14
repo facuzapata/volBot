@@ -227,7 +227,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                 const buyPendingMovement = signal.movements.find(m =>
                     m.type === MovementType.BUY && m.status === MovementStatus.PENDING
                 );
-                const sellPendingMovement = signal.movements.find(m =>
+                const sellPendingMovements = signal.movements.filter(m =>
                     m.type === MovementType.SELL && m.status === MovementStatus.PENDING
                 );
 
@@ -242,21 +242,29 @@ export class MultiUserStrategyService implements OnModuleInit {
                 // ✅ 1. Actualizar BUY pendientes
                 if (buyPendingMovement) {
                     try {
-                        const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(buyPendingMovement.binanceOrderId), userId);
-                        console.log('orderStatus', orderStatus);
-                        if (orderStatus.status === 'FILLED') {
-                            await this.signalDbService.updateMovementStatus(buyPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
-                            this.logger.debug(`✅ [Usuario ${userId}] BUY completado para ${signal.symbol}`);
+                        if (!buyPendingMovement.binanceOrderId) {
+                            this.logger.warn(`[Usuario ${userId}] BUY pendiente sin binanceOrderId: ${buyPendingMovement.id}`);
+                        } else {
+                            const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(buyPendingMovement.binanceOrderId), userId);
+                            const mappedBuyStatus = this.mapBinanceOrderStatus(orderStatus.status);
 
-                            // 🎯 Crear orden de VENTA LIMIT automáticamente después de confirmar la compra
-                            const existingSellMovement = signal.movements.find(m =>
-                                m.type === MovementType.SELL &&
-                                (m.status === MovementStatus.PENDING || m.status === MovementStatus.FILLED)
-                            );
+                            if (mappedBuyStatus === MovementStatus.FILLED) {
+                                await this.signalDbService.updateMovementStatus(buyPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
+                                this.logger.debug(`✅ [Usuario ${userId}] BUY completado para ${signal.symbol}`);
 
-                            if (!existingSellMovement) {
-                                this.logger.log(`📤 [Usuario ${userId}] Creando orden de venta LIMIT automática para señal ${signal.id}`);
-                                await this.createSellSignalForUser(userId, userConfig, candle, signal, techIndicators.atr);
+                                // Crear orden de VENTA automáticamente después de confirmar la compra
+                                const existingSellMovement = signal.movements.find(m =>
+                                    m.type === MovementType.SELL &&
+                                    (m.status === MovementStatus.PENDING || m.status === MovementStatus.FILLED)
+                                );
+
+                                if (!existingSellMovement) {
+                                    this.logger.log(`📤 [Usuario ${userId}] Creando orden de venta LIMIT automática para señal ${signal.id}`);
+                                    await this.createSellSignalForUser(userId, userConfig, candle, signal, techIndicators.atr);
+                                }
+                            } else if (mappedBuyStatus === MovementStatus.CANCELLED || mappedBuyStatus === MovementStatus.FAILED) {
+                                await this.signalDbService.updateMovementStatus(buyPendingMovement.id, mappedBuyStatus, { binanceResponse: orderStatus });
+                                this.logger.debug(`[Usuario ${userId}] BUY ${buyPendingMovement.id} actualizado a ${mappedBuyStatus} (${orderStatus.status})`);
                             }
                         }
                     } catch (error) {
@@ -265,22 +273,43 @@ export class MultiUserStrategyService implements OnModuleInit {
                 }
 
                 // ✅ 2. Actualizar SELL pendientes
-                if (sellPendingMovement) {
-                    hasPendingSell = true;
-                    try {
-                        const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(sellPendingMovement.binanceOrderId), userId);
-                        if (orderStatus.status === 'FILLED') {
-                            await this.signalDbService.updateMovementStatus(sellPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
-                            await this.tryCreateResidualSellForSignal(userId, userConfig, signal.id, signal.symbol, candle.close);
-                            this.logger.debug(`💰 [Usuario ${userId}] SELL completado para ${signal.symbol}`);
+                if (sellPendingMovements.length > 0) {
+                    for (const sellPendingMovement of sellPendingMovements) {
+                        try {
+                            if (!sellPendingMovement.binanceOrderId) {
+                                hasPendingSell = true;
+                                this.logger.warn(`[Usuario ${userId}] SELL pendiente sin binanceOrderId: ${sellPendingMovement.id}`);
+                                continue;
+                            }
+
+                            const orderStatus = await this.multiBinanceService.getOrderStatus(signal.symbol, Number(sellPendingMovement.binanceOrderId), userId);
+                            const mappedSellStatus = this.mapBinanceOrderStatus(orderStatus.status);
+
+                            if (mappedSellStatus === MovementStatus.PENDING) {
+                                hasPendingSell = true;
+                                continue;
+                            }
+
+                            await this.signalDbService.updateMovementStatus(sellPendingMovement.id, mappedSellStatus, { binanceResponse: orderStatus });
+
+                            if (mappedSellStatus === MovementStatus.FILLED) {
+                                await this.tryCreateResidualSellForSignal(userId, userConfig, signal.id, signal.symbol, candle.close);
+                                this.logger.debug(`💰 [Usuario ${userId}] SELL completado para ${signal.symbol}`);
+                            } else {
+                                this.logger.debug(`[Usuario ${userId}] SELL ${sellPendingMovement.id} actualizado a ${mappedSellStatus} (${orderStatus.status})`);
+                            }
+                        } catch (error) {
+                            hasPendingSell = true;
+                            this.logger.error(`❌ [Usuario ${userId}] Error actualizando estado de SELL ${sellPendingMovement.id}:`, this.getErrorMessage(error));
                         }
-                    } catch (error) {
-                        this.logger.error(`❌ [Usuario ${userId}] Error actualizando estado de SELL ${sellPendingMovement.id}:`, this.getErrorMessage(error));
                     }
                 }
                 // 🧠 Marcar la señal como "lista para vender" si tiene BUY FILLED y no tiene SELL pendiente/filled
                 const hasBuyFilled = !!buyFilledMovement;
-                const hasSellOpenOrFilled = !!(sellPendingMovement || sellFilledMovement);
+                const hasSellOpenOrFilled = signal.movements.some(m =>
+                    m.type === MovementType.SELL &&
+                    (m.status === MovementStatus.PENDING || m.status === MovementStatus.FILLED)
+                ) || !!sellFilledMovement;
                 signal["readyToSell"] = hasBuyFilled && !hasSellOpenOrFilled;
             }
 
@@ -1177,5 +1206,19 @@ export class MultiUserStrategyService implements OnModuleInit {
 
     private getErrorMessage(error: unknown): string {
         return error instanceof Error ? error.message : String(error);
+    }
+
+    private mapBinanceOrderStatus(status: string): MovementStatus {
+        switch (status) {
+            case 'FILLED':
+                return MovementStatus.FILLED;
+            case 'CANCELED':
+            case 'EXPIRED':
+                return MovementStatus.CANCELLED;
+            case 'REJECTED':
+                return MovementStatus.FAILED;
+            default:
+                return MovementStatus.PENDING;
+        }
     }
 }
