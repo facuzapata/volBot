@@ -466,12 +466,12 @@ export class MultiUserStrategyService implements OnModuleInit {
                 });
 
                 if (!aiDecision.approved) {
-                    this.logger.warn(`🤖 [Usuario ${userId}] COMPRA bloqueada por IA (${aiDecision.source}): ${aiDecision.reason}`);
+                    this.logger.warn(`[AiAnalysis][Usuario ${userId}] COMPRA bloqueada (${aiDecision.source}): ${aiDecision.reason}`);
                     return;
                 }
 
                 if (!aiDecision.skipped) {
-                    this.logger.log(`🤖 [Usuario ${userId}] IA aprobó compra (${aiDecision.source})${aiDecision.confidence !== null ? ` conf=${aiDecision.confidence.toFixed(3)}` : ''}`);
+                    this.logger.log(`[AiAnalysis][Usuario ${userId}] Compra aprobada (${aiDecision.source})${aiDecision.confidence !== null ? ` conf=${aiDecision.confidence.toFixed(3)}` : ''}`);
                 }
 
                 this.logger.log(`🟢 [Usuario ${userId}] GENERANDO SEÑAL DE COMPRA a ${candle.close}`);

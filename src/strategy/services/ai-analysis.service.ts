@@ -82,7 +82,7 @@ export class AiAnalysisService {
             const parsedDecision = this.parseDecision(rawResponse);
 
             if (!parsedDecision) {
-                this.logger.warn(`🤖 [Usuario ${input.userId}] Respuesta IA inválida, aplicando fallback`);
+                this.logger.warn(`[AiAnalysis][Usuario ${input.userId}] Respuesta inválida, aplicando fallback`);
                 return fallback;
             }
 
@@ -118,7 +118,7 @@ export class AiAnalysisService {
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            this.logger.warn(`🤖 [Usuario ${input.userId}] Error en análisis IA: ${message}`);
+            this.logger.warn(`[AiAnalysis][Usuario ${input.userId}] Error: ${message}`);
             return fallback;
         }
     }
