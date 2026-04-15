@@ -24,6 +24,8 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
     private userClients: Map<string, UserBinanceClient> = new Map();
     private priceWebSockets: Map<string, (() => void)> = new Map(); // symbol -> close function
     private activeSymbols: Set<string> = new Set();
+    private readonly ORDER_STATUS_MAX_RETRIES = 3;
+    private readonly ORDER_STATUS_RETRY_DELAY_MS = 700;
 
     constructor(
         private eventEmitter: EventEmitter2,
@@ -363,6 +365,27 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
         this.logger.log(`🗑️ Cliente removido para usuario ${userId}`);
     }
 
+    private isTransientNetworkError(error: unknown): boolean {
+        const err = error as any;
+        const code = String(err?.code || err?.cause?.code || '').toUpperCase();
+        const message = String(err?.message || '').toLowerCase();
+        const causeMessage = String(err?.cause?.message || '').toLowerCase();
+
+        return [
+            code.includes('EAI_AGAIN'),
+            code.includes('ECONNRESET'),
+            code.includes('ETIMEDOUT'),
+            message.includes('fetch failed'),
+            message.includes('network'),
+            causeMessage.includes('fetch failed'),
+            causeMessage.includes('network')
+        ].some(Boolean);
+    }
+
+    private async delay(ms: number): Promise<void> {
+        await new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     async getOrderStatus(symbol: string, orderId: number, userId: string): Promise<BinanceOrderResponse> {
         const userClient = await this.getUserClient(userId);
 
@@ -370,30 +393,43 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
             throw new Error(`Cliente no disponible para usuario ${userId}`);
         }
 
-        try {
-            const response = await userClient.client.getOrder({
-                symbol,
-                orderId,
-            });
-            return response;
-        } catch (error) {
-            // Manejo específico del error de timestamp
-            if ((error as any).code === -1021) {
-                this.logger.warn(`⚠️ [${userClient.user.email}] Error de timestamp al consultar orden, re-sincronizando...`);
-                await this.syncServerTime(userId);
-
-                // Reintentar después de sincronizar
+        for (let attempt = 1; attempt <= this.ORDER_STATUS_MAX_RETRIES; attempt++) {
+            try {
                 const response = await userClient.client.getOrder({
                     symbol,
                     orderId,
                 });
-                this.logger.log(`✅ [${userClient.user.email}] Orden consultada después de re-sincronizar: ${orderId}`);
                 return response;
-            }
+            } catch (error) {
+                // Manejo específico del error de timestamp
+                if ((error as any).code === -1021) {
+                    this.logger.warn(`⚠️ [${userClient.user.email}] Error de timestamp al consultar orden, re-sincronizando...`);
+                    await this.syncServerTime(userId);
 
-            this.logger.error(`❌ [${userClient.user.email}] Error consultando orden ${orderId}:`, error);
-            throw error;
+                    // Reintentar después de sincronizar
+                    const response = await userClient.client.getOrder({
+                        symbol,
+                        orderId,
+                    });
+                    this.logger.log(`✅ [${userClient.user.email}] Orden consultada después de re-sincronizar: ${orderId}`);
+                    return response;
+                }
+
+                const canRetry = this.isTransientNetworkError(error) && attempt < this.ORDER_STATUS_MAX_RETRIES;
+                if (canRetry) {
+                    this.logger.warn(
+                        `⚠️ [${userClient.user.email}] Error de red consultando orden ${orderId} (intento ${attempt}/${this.ORDER_STATUS_MAX_RETRIES}), reintentando...`
+                    );
+                    await this.delay(this.ORDER_STATUS_RETRY_DELAY_MS * attempt);
+                    continue;
+                }
+
+                this.logger.error(`❌ [${userClient.user.email}] Error consultando orden ${orderId}:`, error);
+                throw error;
+            }
         }
+
+        throw new Error(`No se pudo consultar la orden ${orderId}`);
     }
 
     /**

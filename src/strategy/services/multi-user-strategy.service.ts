@@ -25,6 +25,8 @@ interface UserStrategyConfig {
     maxActiveSignals: number;
     dailySignalCount: number;
     lastResetDate: string;
+    userUpdatedAt: number;
+    lastSyncedAt: number;
 }
 
 @Injectable()
@@ -38,6 +40,7 @@ export class MultiUserStrategyService implements OnModuleInit {
     private readonly MIN_PROFIT_MARGIN = 0.005;
     private readonly PAPER_TRADING: boolean;
     private readonly maxDailySignalsDefault = 300;
+    private readonly USER_CONFIG_REFRESH_MS = 15000;
 
     constructor(
         private readonly eventEmitter: EventEmitter2,
@@ -79,6 +82,57 @@ export class MultiUserStrategyService implements OnModuleInit {
         return rawMargin > 1 ? rawMargin / 100 : rawMargin;
     }
 
+    private buildUserStrategyConfig(user: User, previousConfig?: UserStrategyConfig): UserStrategyConfig {
+        const normalizedProfitMargin = this.normalizeMargin(Number(user.profitMargin));
+        const normalizedSellMargin = this.normalizeMargin(Number(user.sellMargin));
+
+        return {
+            userId: user.id,
+            userEmail: user.email,
+            capitalForSignals: Number(user.capitalForSignals),
+            capitalPerTrade: Number(user.capitalPerTrade),
+            profitMargin: normalizedProfitMargin,
+            sellMargin: normalizedSellMargin,
+            maxActiveSignals: user.maxActiveSignals,
+            dailySignalCount: previousConfig?.dailySignalCount || 0,
+            lastResetDate: previousConfig?.lastResetDate || new Date().toDateString(),
+            userUpdatedAt: user.updatedAt?.getTime() || Date.now(),
+            lastSyncedAt: Date.now()
+        };
+    }
+
+    private async refreshUserConfigIfNeeded(userId: string, currentConfig: UserStrategyConfig): Promise<UserStrategyConfig | null> {
+        const now = Date.now();
+
+        if (now - currentConfig.lastSyncedAt < this.USER_CONFIG_REFRESH_MS) {
+            return currentConfig;
+        }
+
+        const user = await this.userRepository.findOne({
+            where: { id: userId, isActive: true }
+        });
+
+        if (!user) {
+            this.userConfigs.delete(userId);
+            this.logger.warn(`⚠️ [Usuario ${userId}] Configuración removida del runtime porque el usuario ya no está activo`);
+            return null;
+        }
+
+        const userUpdatedAt = user.updatedAt?.getTime() || now;
+        if (userUpdatedAt <= currentConfig.userUpdatedAt) {
+            currentConfig.lastSyncedAt = now;
+            return currentConfig;
+        }
+
+        const refreshedConfig = this.buildUserStrategyConfig(user, currentConfig);
+        this.userConfigs.set(userId, refreshedConfig);
+
+        this.logger.log(`🔄 [Usuario ${userId}] Configuración resincronizada desde base de datos`);
+        this.logger.log(`   📊 Max señales activas: ${currentConfig.maxActiveSignals} -> ${refreshedConfig.maxActiveSignals}`);
+
+        return refreshedConfig;
+    }
+
     private async loadActiveUsers() {
         const activeUsers = await this.userRepository.find({
             where: { isActive: true }
@@ -87,20 +141,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.log(`📥 Cargando configuración para ${activeUsers.length} usuarios activos...`);
 
         for (const user of activeUsers) {
-            const normalizedProfitMargin = this.normalizeMargin(Number(user.profitMargin));
-            const normalizedSellMargin = this.normalizeMargin(Number(user.sellMargin));
-
-            const config: UserStrategyConfig = {
-                userId: user.id,
-                userEmail: user.email,
-                capitalForSignals: Number(user.capitalForSignals),
-                capitalPerTrade: Number(user.capitalPerTrade),
-                profitMargin: normalizedProfitMargin,
-                sellMargin: normalizedSellMargin,
-                maxActiveSignals: user.maxActiveSignals,
-                dailySignalCount: 0,
-                lastResetDate: new Date().toDateString()
-            };
+            const config = this.buildUserStrategyConfig(user);
 
             this.userConfigs.set(user.id, config);
             this.logger.log(`✅ Configuración cargada para usuario ${user.email}:`);
@@ -202,7 +243,12 @@ export class MultiUserStrategyService implements OnModuleInit {
 
         // Procesar estrategia para cada usuario activo
         for (const [userId, userConfig] of this.userConfigs.entries()) {
-            await this.processUserStrategy(userId, userConfig, candle, indicators, candles, symbol, timeframeMinutes);
+            const refreshedConfig = await this.refreshUserConfigIfNeeded(userId, userConfig);
+            if (!refreshedConfig) {
+                continue;
+            }
+
+            await this.processUserStrategy(userId, refreshedConfig, candle, indicators, candles, symbol, timeframeMinutes);
         }
 
         this.lastCandle = candle;
@@ -1152,17 +1198,7 @@ export class MultiUserStrategyService implements OnModuleInit {
             throw new Error(`Usuario ${userId} no encontrado o inactivo`);
         }
 
-        const config: UserStrategyConfig = {
-            userId: user.id,
-            userEmail: user.email,
-            capitalForSignals: Number(user.capitalForSignals),
-            capitalPerTrade: Number(user.capitalPerTrade),
-            profitMargin: this.normalizeMargin(Number(user.profitMargin)),
-            sellMargin: this.normalizeMargin(Number(user.sellMargin)),
-            maxActiveSignals: user.maxActiveSignals,
-            dailySignalCount: 0,
-            lastResetDate: new Date().toDateString()
-        };
+        const config = this.buildUserStrategyConfig(user);
 
         this.userConfigs.set(userId, config);
         this.logger.log(`✅ Configuración agregada para usuario ${user.email}`);
@@ -1184,17 +1220,7 @@ export class MultiUserStrategyService implements OnModuleInit {
             throw new Error(`Usuario ${userId} no encontrado o inactivo`);
         }
 
-        const config: UserStrategyConfig = {
-            userId: user.id,
-            userEmail: user.email,
-            capitalForSignals: Number(user.capitalForSignals),
-            capitalPerTrade: Number(user.capitalPerTrade),
-            profitMargin: this.normalizeMargin(Number(user.profitMargin)),
-            sellMargin: this.normalizeMargin(Number(user.sellMargin)),
-            maxActiveSignals: user.maxActiveSignals,
-            dailySignalCount: this.userConfigs.get(userId)?.dailySignalCount || 0,
-            lastResetDate: this.userConfigs.get(userId)?.lastResetDate || new Date().toDateString()
-        };
+        const config = this.buildUserStrategyConfig(user, this.userConfigs.get(userId));
 
         this.userConfigs.set(userId, config);
         this.logger.log(`🔄 Configuración recargada para usuario ${user.email}:`);
