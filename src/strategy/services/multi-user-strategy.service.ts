@@ -13,6 +13,7 @@ import { TelegramService } from '../../notifications/telegram.service';
 import { WhatsAppService } from '../../notifications/whatsapp.service';
 import { BinanceMultiWsService } from '../../binance/services/binance-multi-ws.service';
 import { AiAnalysisService } from './ai-analysis.service';
+import { MarketContextService } from './market-context.service';
 import * as indicators from '../../utils/indicators';
 
 interface UserStrategyConfig {
@@ -52,6 +53,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         private readonly telegramService: TelegramService,
         private readonly whatsappService: WhatsAppService,
         private readonly aiAnalysisService: AiAnalysisService,
+        private readonly marketContextService: MarketContextService,
         @InjectRepository(User)
         private userRepository: Repository<User>
     ) {
@@ -506,6 +508,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                 const takeProfit = candle.close * (1 + userConfig.profitMargin);
                 const rawPositionSize = userConfig.capitalPerTrade / candle.close;
                 const positionSize = Math.max(0.00001, Math.floor(rawPositionSize / 0.00001) * 0.00001);
+                const aiContext = await this.marketContextService.getAiContext(symbol);
 
                 const aiDecision = await this.aiAnalysisService.evaluateBuySignal({
                     userId,
@@ -531,13 +534,16 @@ export class MultiUserStrategyService implements OnModuleInit {
                         priceNearBBLower,
                         volumeConfirmation
                     },
-                    recentCandles: candles.slice(-30).map((entry) => ({
+                    recentCandles: candles.slice(-50).map((entry) => ({
                         open: entry.open,
                         high: entry.high,
                         low: entry.low,
                         close: entry.close,
-                        volume: entry.volume
-                    }))
+                        volume: entry.volume,
+                        timestamp: entry.timestamp
+                    })),
+                    recentNews: aiContext.recentNews,
+                    marketContext: aiContext.marketContext
                 });
 
                 if (!aiDecision.approved) {

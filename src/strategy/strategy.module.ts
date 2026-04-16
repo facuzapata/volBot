@@ -4,6 +4,7 @@ import { MultiUserStrategyService } from './services/multi-user-strategy.service
 import { SignalDatabaseService } from './services/signal-database.service';
 import { CandleCacheService } from './services/candle-cache.service';
 import { AiAnalysisService } from './services/ai-analysis.service';
+import { MarketContextService } from './services/market-context.service';
 import { BinanceModule } from 'src/binance/binance.module';
 import { Signal, Movement } from './entities';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -20,13 +21,15 @@ import { UserCredentials } from '../users/entities/user-credentials.entity';
     MultiUserStrategyService,
     SignalDatabaseService,
     CandleCacheService,
-    AiAnalysisService
+    AiAnalysisService,
+    MarketContextService
   ],
   exports: [
     MultiUserStrategyService,
     SignalDatabaseService,
     CandleCacheService,
-    AiAnalysisService
+    AiAnalysisService,
+    MarketContextService
   ],
 })
 export class StrategyModule { }
