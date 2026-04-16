@@ -153,6 +153,7 @@ src/
 │   ├── services/
 │   │   ├── multi-user-strategy.service.ts   # Estrategia principal multi-usuario
 │   │   ├── ai-analysis.service.ts           # Filtro IA pre-compra via Ollama
+│   │   ├── market-context.service.ts        # Contexto de mercado (noticias + Fear & Greed)
 │   │   ├── signal-database.service.ts
 │   │   └── candle-cache.service.ts
 │   ├── entities/
@@ -194,6 +195,12 @@ src/
            ├─> Evalúa condiciones de mercado (6 condiciones)
            ├─> Si pasan >= 5/6 condiciones:
            │   ├─> [ANALISIS_IA=true] AiAnalysisService: consulta Ollama con contexto completo
+           │   │   ├─> MarketContextService obtiene en paralelo:
+           │   │   │   ├─> Noticias recientes (RSS: Google News, CoinDesk, Cointelegraph, Decrypt)
+           │   │   │   ├─> Fear & Greed Index (Alternative.me)
+           │   │   │   ├─> Cambios de precio (1m, 5m, 15m, 24h) y volumen (Binance)
+           │   │   │   ├─> Funding rate y Open Interest (Binance Futures)
+           │   │   │   └─> Detección de régimen de mercado (impulsivo, tendencia, rango, mixto)
            │   │   ├─> APPROVE + confidence >= IA_MIN_CONFIDENCE => genera orden
            │   │   └─> REJECT o timeout => bloquea o deja pasar (según IA_BLOCKS_TRADES)
            │   └─> [ANALISIS_IA=false] genera orden directamente
@@ -277,6 +284,87 @@ OLLAMA_URL=http://ollama:11434
 OLLAMA_MODEL=qwen2.5:1.5b-instruct
 OLLAMA_TIMEOUT_MS=20000
 IA_MIN_CONFIDENCE=0.65
+
+# Contexto de Mercado (Noticias + Sentimiento)
+# Se obtienen automáticamente sin API key (RSS abiertos + Alternative.me)
+# Cache en Redis para evitar overload
+AI_NEWS_CACHE_TTL_SECONDS=180          # TTL para cache de noticias (default: 3 min)
+AI_MARKET_CACHE_TTL_SECONDS=45         # TTL para cache de contexto de mercado (default: 45 seg)
+AI_NEWS_LOOKBACK_MINUTES=240           # Rango de búsqueda de noticias (default: 4 horas)
+AI_MAX_NEWS_ITEMS=8                    # Max noticias a pasar a la IA (default: 8)
+AI_MAX_FEED_ITEMS_PER_SOURCE=12        # Max items por fuente RSS (default: 12)
+```
+
+---
+
+## Contexto de Mercado para la IA
+
+El servicio `MarketContextService` enriquece automáticamente cada evaluación de compra con contexto real de mercado, totalmente **gratis y sin API keys**. Se ejecuta solo si `ANALISIS_IA=true`.
+
+### Fuentes de Datos
+
+| Fuente | Tipo | Refresco | Datos |
+|--------|------|----------|-------|
+| **Google News RSS** | RSS | En demanda | Titulares con relevancia dinámica |
+| **CoinDesk RSS** | RSS | En demanda | Noticias de crypto profesionales |
+| **Cointelegraph RSS** | RSS | En demanda | Análisis y market insights |
+| **Decrypt RSS** | RSS | En demanda | Noticias e investigaciones |
+| **Alternative.me** | API | Diario | Fear & Greed Index |
+| **Binance Spot API** | API | En demanda | Ticker 24h, Klines 1m/5m/15m, Volumen |
+| **Binance Futures API** | API | En demanda | Funding Rate, Open Interest |
+
+### Contexto Enviado a Ollama
+
+```typescript
+{
+  recentNews: [
+    {
+      source: "CoinDesk",
+      publishedAt: "2026-04-16T14:30:00Z",
+      title: "Bitcoin ETF Hits $X Billion AUM",
+      summary: "...",
+      sentiment: "bullish",  // bullish | bearish | neutral
+      relevance: 3           // Score de relevancia (0-4+)
+    },
+    // ... hasta 8 noticias más relevantes
+  ],
+  marketContext: {
+    marketRegime: "impulsive_uptrend",  // uptrend | downtrend | mixed | impulsive_* | unknown
+    fearGreedValue: 45,
+    fearGreedClassification: "Fear",
+    priceChange1mPct: 0.0025,            // Cambio de precio últimos 60 seg
+    priceChange5mPct: -0.0015,           // Cambio de precio últimos 5 min
+    priceChange15mPct: 0.0045,           // Cambio de precio últimos 15 min
+    priceChange24hPct: 0.025,            // Cambio de precio últimas 24h
+    fundingRate: 0.000125,               // Tasa de funding (futures)
+    openInterest: 450000000,             // Open interest en USD
+    quoteVolume24h: 12500000,            // Volumen en quote asset (24h)
+    notes: [
+      "Movimiento brusco en 1m: 0.25%",
+      "Sentimiento macro: Fear"
+    ]
+  }
+}
+```
+
+### Caching Inteligente
+
+Toda la información se cachea en Redis:
+- **Noticias**: 3 minutos (evita spam de RSS)
+- **Contexto de Mercado**: 45 segundos (mantiene data fresca)
+- Si Redis no está disponible, la IA opera sin contexto pero sin bloquear
+
+### Ejemplo de Decisión Enriquecida
+
+Sin contexto:
+```
+RSI=65, MACD cruzó, volumen sube => comprar
+```
+
+Con contexto:
+```
+RSI=65, MACD cruzó, volumen sube + Fear index bajo + noticia de liquidación de whale
+=> LA IA PUEDE REPLANTEARSE SI VALE LA PENA
 ```
 
 ---
@@ -298,6 +386,7 @@ npm run test:e2e
 - Notificaciones privadas por usuario (Telegram / WhatsApp)
 - WebSockets multi-símbolo
 - Análisis IA opcional via Ollama
+- Contexto de mercado en tiempo real (noticias + Fear & Greed)
 
 **En desarrollo:**
 - Dashboard web
