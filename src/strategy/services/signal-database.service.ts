@@ -105,6 +105,71 @@ export class SignalDatabaseService {
         return updatedSignal;
     }
 
+    async updateSignalExecutionLevels(
+        signalId: string,
+        levels: {
+            initialPrice?: number;
+            stopLoss?: number;
+            takeProfit?: number;
+        }
+    ): Promise<Signal> {
+        const signal = await this.signalRepository.findOne({ where: { id: signalId } });
+        if (!signal) {
+            throw new Error(`Signal with id ${signalId} not found`);
+        }
+
+        if (levels.initialPrice !== undefined) {
+            if (!Number.isFinite(levels.initialPrice) || levels.initialPrice <= 0) {
+                throw new Error(`initialPrice inválido para señal ${signalId}: ${levels.initialPrice}`);
+            }
+            signal.initialPrice = levels.initialPrice;
+        }
+
+        if (levels.stopLoss !== undefined) {
+            if (!Number.isFinite(levels.stopLoss) || levels.stopLoss <= 0) {
+                throw new Error(`stopLoss inválido para señal ${signalId}: ${levels.stopLoss}`);
+            }
+            signal.stopLoss = levels.stopLoss;
+        }
+
+        if (levels.takeProfit !== undefined) {
+            if (!Number.isFinite(levels.takeProfit) || levels.takeProfit <= 0) {
+                throw new Error(`takeProfit inválido para señal ${signalId}: ${levels.takeProfit}`);
+            }
+            signal.takeProfit = levels.takeProfit;
+        }
+
+        const updatedSignal = await this.signalRepository.save(signal);
+        this.logger.log(
+            `🧭 Señal ${signalId} actualizada con precio ejecutado: entry=${Number(updatedSignal.initialPrice).toFixed(2)} SL=${Number(updatedSignal.stopLoss).toFixed(2)} TP=${Number(updatedSignal.takeProfit).toFixed(2)}`
+        );
+        return updatedSignal;
+    }
+
+    async hasRecentStopLossStreak(
+        userId: string,
+        symbol: string,
+        minStops: number,
+        lookbackHours: number
+    ): Promise<boolean> {
+        if (minStops <= 0 || lookbackHours <= 0) {
+            return false;
+        }
+
+        const cutoff = new Date(Date.now() - (lookbackHours * 60 * 60 * 1000));
+
+        const stoppedCount = await this.signalRepository
+            .createQueryBuilder('signal')
+            .where('signal.userId = :userId', { userId })
+            .andWhere('signal.symbol = :symbol', { symbol })
+            .andWhere('signal.status = :status', { status: SignalStatus.STOPPED })
+            .andWhere('signal.closedAt IS NOT NULL')
+            .andWhere('signal.closedAt >= :cutoff', { cutoff })
+            .getCount();
+
+        return stoppedCount >= minStops;
+    }
+
     async updateMovementStatus(
         movementId: string,
         status: MovementStatus,

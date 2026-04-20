@@ -39,10 +39,20 @@ describe('TradingService', () => {
       expect.stringContaining('🟢 Compra simulada: BTCUSDT @ 50000.00')
     );
     expect(service['openTrades']).toHaveLength(1);
-    expect(service['openTrades'][0]).toMatchObject({
-      ...buySignal,
-      status: 'open'
-    });
+    expect(service['openTrades'][0]).toEqual(expect.objectContaining({
+      id: buySignal.id,
+      symbol: buySignal.symbol,
+      side: buySignal.side,
+      price: buySignal.price,
+      size: buySignal.size,
+      stopLoss: buySignal.stopLoss,
+      takeProfit: buySignal.takeProfit,
+      paperTrading: buySignal.paperTrading,
+      confidence: buySignal.confidence,
+      indicators: buySignal.indicators,
+      status: 'open',
+      timestamp: expect.any(Number)
+    }));
   });
 
   it('should handle sell signal and add to open trades', async () => {
@@ -68,10 +78,21 @@ describe('TradingService', () => {
       expect.stringContaining('🔴 Venta simulada: BTCUSDT @ 51000.00')
     );
     expect(service['openTrades']).toHaveLength(1);
-    expect(service['openTrades'][0]).toMatchObject({
-      ...sellSignal,
-      status: 'open'
-    });
+    expect(service['openTrades'][0]).toEqual(expect.objectContaining({
+      id: sellSignal.id,
+      symbol: sellSignal.symbol,
+      side: sellSignal.side,
+      price: sellSignal.price,
+      size: sellSignal.size,
+      stopLoss: sellSignal.stopLoss,
+      takeProfit: sellSignal.takeProfit,
+      paperTrading: sellSignal.paperTrading,
+      confidence: sellSignal.confidence,
+      indicators: sellSignal.indicators,
+      buySignalId: sellSignal.buySignalId,
+      status: 'open',
+      timestamp: expect.any(Number)
+    }));
   });
 
   it('should close buy trade when price hits stop loss', async () => {

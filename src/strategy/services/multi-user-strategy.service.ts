@@ -42,6 +42,8 @@ export class MultiUserStrategyService implements OnModuleInit {
     private readonly PAPER_TRADING: boolean;
     private readonly maxDailySignalsDefault = 300;
     private readonly USER_CONFIG_REFRESH_MS = 15000;
+    private readonly stopLossStreakThreshold = Number(process.env.STOPLOSS_STREAK_THRESHOLD || 2);
+    private readonly stopLossCooldownHours = Number(process.env.STOPLOSS_COOLDOWN_HOURS || 6);
 
     constructor(
         private readonly eventEmitter: EventEmitter2,
@@ -297,7 +299,16 @@ export class MultiUserStrategyService implements OnModuleInit {
                             const mappedBuyStatus = this.mapBinanceOrderStatus(orderStatus.status);
 
                             if (mappedBuyStatus === MovementStatus.FILLED) {
-                                await this.signalDbService.updateMovementStatus(buyPendingMovement.id, MovementStatus.FILLED, { binanceResponse: orderStatus });
+                                await this.signalDbService.updateMovementWithOrderData(buyPendingMovement.id, {
+                                    binanceOrderId: Number(orderStatus.orderId),
+                                    clientOrderId: String(orderStatus.clientOrderId || ''),
+                                    status: String(orderStatus.status || ''),
+                                    executedQty: String(orderStatus.executedQty || ''),
+                                    price: String(orderStatus.price || ''),
+                                    fills: Array.isArray((orderStatus as any).fills) ? (orderStatus as any).fills : [],
+                                    transactTime: (orderStatus as any).updateTime || orderStatus.transactTime,
+                                    fullResponse: orderStatus
+                                });
                                 this.logger.debug(`✅ [Usuario ${userId}] BUY completado para ${signal.symbol}`);
 
                                 // Crear orden de VENTA automáticamente después de confirmar la compra
@@ -487,23 +498,37 @@ export class MultiUserStrategyService implements OnModuleInit {
             return;
         }
 
+        const hasStopLossStreak = await this.signalDbService.hasRecentStopLossStreak(
+            userId,
+            symbol,
+            this.stopLossStreakThreshold,
+            this.stopLossCooldownHours
+        );
+
+        if (hasStopLossStreak) {
+            this.logger.warn(
+                `🧊 [Usuario ${userId}] Cooldown activo: ${this.stopLossStreakThreshold} STOP LOSS recientes en ${this.stopLossCooldownHours}h. Compra bloqueada.`
+            );
+            return;
+        }
+
         // Condiciones para señal de compra (usando el margen personalizado del usuario)
         const condition1 = isStrongUptrend || (isRangeMarket && latestMACD > latestSignal);
         const condition2 = rsi >= 25 && rsi <= 65;
         const condition3 = latestMACD > latestSignal || latestHistogram > 0;
         const condition4 = bullishEngulfing || candle.close > candle.open;
         const condition5 = priceNearBBLower || candle.close < smaShort;
-        // const condition6 = volumeConfirmation;
+        const condition6 = volumeConfirmation;
         const condition7 = candle.close > smaLong * 0.995;
 
-        const buyConditions = [condition1, condition2, condition3, condition4, condition5, condition7];
+        const buyConditions = [condition1, condition2, condition3, condition4, condition5, condition6, condition7];
         const passedConditions = buyConditions.filter(Boolean).length;
 
-        this.logger.debug(`📈 [Usuario ${userId}] Resultado: ${passedConditions}/6 condiciones cumplidas`);
+        this.logger.debug(`📈 [Usuario ${userId}] Resultado: ${passedConditions}/7 condiciones cumplidas`);
 
-        // Necesitamos al menos 5 de 7 condiciones para generar señal
-        if (passedConditions >= 5) {
-            if (await this.validateSignalSafetyForUser(userId, 'buy', candle.close, atr)) {
+        // Necesitamos al menos 6 de 7 condiciones para generar señal
+        if (passedConditions >= 6) {
+            if (await this.validateSignalSafetyForUser(userId, 'buy', candle.close, atr, userConfig)) {
                 const stopLoss = candle.close * (1 - userConfig.sellMargin);
                 const takeProfit = candle.close * (1 + userConfig.profitMargin);
                 const rawPositionSize = userConfig.capitalPerTrade / candle.close;
@@ -740,7 +765,21 @@ export class MultiUserStrategyService implements OnModuleInit {
             return;
         }
 
-        const sellPrice = signal.takeProfit;
+        const executedBuyPrice = this.resolveExecutedBuyPrice(buyMovement, Number(signal.initialPrice));
+        const stopLossPercent = userStrategyConfig.sellMargin;
+        const takeProfitPercent = userStrategyConfig.profitMargin;
+        const stopPrice = executedBuyPrice * (1 - stopLossPercent);
+        const sellPrice = executedBuyPrice * (1 + takeProfitPercent);
+
+        await this.signalDbService.updateSignalExecutionLevels(signal.id, {
+            initialPrice: executedBuyPrice,
+            stopLoss: stopPrice,
+            takeProfit: sellPrice
+        });
+
+        signal.initialPrice = executedBuyPrice;
+        signal.stopLoss = stopPrice;
+        signal.takeProfit = sellPrice;
 
         this.logger.debug(`🔍 [Usuario ${userId}] DEBUG VENTA - Movimiento: ${buyMovement.id}`);
         this.logger.debug(`  📊 Cantidad en DB: ${buyMovement.quantity}`);
@@ -789,7 +828,6 @@ export class MultiUserStrategyService implements OnModuleInit {
         this.logger.debug(`  💰 Comisión estimada: ${commission}`);
         this.logger.debug(`  💰 Neto estimado: ${netAmount}`);
 
-        const stopLossPercent = userStrategyConfig.sellMargin; // ej: 0.005 = 0.5%
         const useOCO = !this.PAPER_TRADING && stopLossPercent > 0;
 
         // Crear movimiento TP (take profit)
@@ -825,8 +863,6 @@ export class MultiUserStrategyService implements OnModuleInit {
             try {
                 if (useOCO) {
                     // Precio de stop: precio de compra menos sellMargin
-                    const buyPrice = Number(signal.initialPrice);
-                    const stopPrice = buyPrice * (1 - stopLossPercent);
                     // stopLimitPrice 0.1% debajo del trigger para asegurar fill
                     const stopLimitPrice = stopPrice * 0.999;
 
@@ -1181,7 +1217,13 @@ export class MultiUserStrategyService implements OnModuleInit {
         };
     }
 
-    private async validateSignalSafetyForUser(userId: string, side: 'buy' | 'sell', price: number, atr: number): Promise<boolean> {
+    private async validateSignalSafetyForUser(
+        userId: string,
+        side: 'buy' | 'sell',
+        price: number,
+        atr: number,
+        userConfig: UserStrategyConfig
+    ): Promise<boolean> {
         // Validaciones básicas de seguridad
         if (price <= 0) return false;
 
@@ -1191,7 +1233,61 @@ export class MultiUserStrategyService implements OnModuleInit {
             return false;
         }
 
+        if (side === 'buy' && userConfig.sellMargin > 0) {
+            const stopDistance = price * userConfig.sellMargin;
+            const takeProfitDistance = price * userConfig.profitMargin;
+            const rr = takeProfitDistance / stopDistance;
+
+            if (rr < 1.2) {
+                this.logger.warn(`⚠️ [Usuario ${userId}] R/R insuficiente: ${rr.toFixed(2)} (< 1.20)`);
+                return false;
+            }
+
+            if (atr > 0 && stopDistance < atr * 0.5) {
+                this.logger.warn(`⚠️ [Usuario ${userId}] Stop loss demasiado corto vs ATR: ${stopDistance.toFixed(2)} < ${(atr * 0.5).toFixed(2)}`);
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    private resolveExecutedBuyPrice(buyMovement: any, fallbackPrice: number): number {
+        const response = buyMovement?.binanceResponse;
+        const executedQty = Number(response?.executedQty);
+        const cumulativeQuoteQty = Number(response?.cummulativeQuoteQty);
+
+        if (Number.isFinite(executedQty) && executedQty > 0 && Number.isFinite(cumulativeQuoteQty) && cumulativeQuoteQty > 0) {
+            return cumulativeQuoteQty / executedQty;
+        }
+
+        if (Array.isArray(response?.fills) && response.fills.length > 0) {
+            const totalQty = response.fills.reduce((sum: number, fill: any) => sum + (Number(fill.qty) || 0), 0);
+            const totalQuote = response.fills.reduce((sum: number, fill: any) => {
+                const price = Number(fill.price);
+                const qty = Number(fill.qty);
+                if (!Number.isFinite(price) || !Number.isFinite(qty)) {
+                    return sum;
+                }
+                return sum + (price * qty);
+            }, 0);
+
+            if (totalQty > 0 && totalQuote > 0) {
+                return totalQuote / totalQty;
+            }
+        }
+
+        const responsePrice = Number(response?.price);
+        if (Number.isFinite(responsePrice) && responsePrice > 0) {
+            return responsePrice;
+        }
+
+        const movementPrice = Number(buyMovement?.price);
+        if (Number.isFinite(movementPrice) && movementPrice > 0) {
+            return movementPrice;
+        }
+
+        return fallbackPrice;
     }
 
     // Método para agregar nuevos usuarios en runtime
