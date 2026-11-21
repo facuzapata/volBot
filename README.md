@@ -25,6 +25,7 @@ docker compose --env-file .env.v2 -f docker-compose.v2.yml up -d --build
 docker compose --env-file .env.v2 -f docker-compose.v2.yml run --rm --no-deps api node dist/v2/cli.js seed
 ```
 
+
 Swagger: http://localhost:3100/api/docs
 
 OpenAPI: http://localhost:3100/api/docs-json ; copia reproducible en [docs/openapi.json](docs/openapi.json).
