@@ -1,0 +1,11 @@
+const fs=require('fs');const {evaluate,hash}=require('./compare.cjs');const {csv}=require('../signal-research/math.cjs');
+const root='reports/btc-v3',freeze=JSON.parse(fs.readFileSync(root+'/candidate-freeze.json'));
+if(fs.existsSync(root+'/oos-started.json'))throw new Error('Final OOS has already been evaluated or started; no automatic second run');
+for(const list of [freeze.sourceHashes,freeze.compiledHashes,freeze.researchScriptHashes,freeze.previousRuntimeHashes])for(const [p,h]of Object.entries(list))if(hash(p)!==h)throw new Error('Frozen candidate changed: '+p);
+if(hash(root+'/calibration-final.json')!==freeze.calibrationHash)throw new Error('Calibration changed');
+const period=JSON.parse(fs.readFileSync(root+'/oos-data/manifest.json'));if(hash(period.input)!==period.datasetFileSHA256)throw new Error('Dataset changed');
+fs.writeFileSync(root+'/oos-started.json',JSON.stringify({startedAt:new Date().toISOString(),freezeHash:freeze.freezeHash,datasetSHA256:period.datasetFileSHA256,policy:'one fixed batch; no subsequent tuning on this window'},null,2));
+const model=JSON.parse(fs.readFileSync(root+'/calibration-final.json')),rows=evaluate({...period,month:period.period},model);
+fs.writeFileSync(root+'/comparison-final.csv',csv(rows));fs.writeFileSync(root+'/comparison-final.json',JSON.stringify(rows,null,2));
+fs.writeFileSync(root+'/oos-completed.json',JSON.stringify({completedAt:new Date().toISOString(),rows:rows.length,freezeHash:freeze.freezeHash,noApprovalGranted:true},null,2));
+console.log('Single final-OOS batch complete. All strategies remain unapproved.');

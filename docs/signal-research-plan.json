@@ -1,0 +1,40 @@
+{
+  "researchVersion": "signal-research-1",
+  "seed": 20261120,
+  "mode": "isolated, read-only source and datasets; no account mutations",
+  "status": "exploratory; all eight existing datasets have already been observed",
+  "periods": ["2025-01-original", "2020-03", "2022-06", "2023-07", "2023-09", "2024-02", "2024-10", "2025-02"],
+  "futureHoldoutCandidatesNotLoadedOrEvaluated": ["2025-03", "2025-04"],
+  "signalDefinition": "btc-v2 eligibility false-to-true transition at a closed minute, identical to backtester; record rejected/unfilled signals too",
+  "entryAnchor": "next contiguous minute open; horizons end at close of entry+horizon-1 minute; research outcomes never used in selection",
+  "horizonsMinutes": [5, 15, 30, 60, 120, 240],
+  "primaryExploratoryContrast": "btc-v2 minus matched C at 60m, net market-entry/market-exit return",
+  "thresholdsPct": {"up": [0.2, 0.4, 0.6, 0.8, 1], "down": [0.2, 0.4, 0.6, 1]},
+  "stopCounterfactualHours": [1, 2, 4, 8, 24],
+  "groups": {
+    "A-random": "seeded simple random closed decision minutes from same period, excluding emitted btc-v2 signals, no matching",
+    "B-uptrend": "random minutes satisfying original primaryTrend 1h, excluding emitted btc-v2 signals",
+    "C-trend-incomplete": "primaryTrend true and full eligibility false",
+    "D-momentum": "primaryTrend true and trailing 15m close return > 0.2%; false-to-true transitions",
+    "E-pullback": "primaryTrend true, close < SMA21 and trailing 5m close return < 0; false-to-true transitions"
+  },
+  "matching": {
+    "controlsPerSignal": 5,
+    "replacementAcrossCases": true,
+    "withinCaseReplacement": false,
+    "ATRpercentBuckets": [0.05, 0.1, 0.2, 0.4],
+    "fallbackOrder": ["same UTC day+4h bin+ATR bin+primaryTrend", "same UTC day+ATR bin+primaryTrend", "same period+4h bin+ATR bin+primaryTrend", "same period+ATR bin+primaryTrend"],
+    "unmatchedPolicy": "leave unmatched; never relax volatility or regime; report coverage and fallback",
+    "futureAvailabilityNotASelectionCriterion": true
+  },
+  "lateEntryHypothesis": "recent 100bar range position >= 0.8 AND prior 15m return >0 AND MACD histogram below 5 minutes earlier; compare prevalence and forward returns to matched uptrend controls",
+  "indicatorComponents": ["primaryTrend", "confirmation", "rsiEntry", "macdEntry", "candle", "volume", "structure"],
+  "componentSampling": "fixed-seed sample at most 1000 closed minutes per component per period; raw component analysis is unadjusted and not a standalone executable strategy",
+  "uncertainty": {"bootstrapReplicates": 2000, "calendarBlockHours": 24, "confidence": 0.95, "stratifyByPeriod": true, "primaryDifferences": "paired case minus mean matched controls, day-block bootstrap", "dependenceLimits": "24h blocks may not absorb longer persistence; report distinct days and deduplicate controls; 5-day block sensitivity on primary contrast", "multipleTesting": "Holm correction for 5 matched/unmatched group contrasts x 6 horizons on pooled expanded history; descriptive intervals otherwise"},
+  "featureBucketsFixedBeforeOutcomes": {"rangePosition100": [0.5, 0.8], "priorReturn15Pct": [0, 0.2], "rsi": [45, 55], "volumeRatio": [1.5, 2], "histogramDelta5": [0], "atrPct": [0.05, 0.1, 0.2]},
+  "costModel": "reuse PaperExecutionAdapter for standalone research entry and bounded market/limit exit, original config, 30USDT budget; no capacity or portfolio admission assumed; actual strategy fills reported separately",
+  "gapPolicy": "quarantine invalid original bars without replacing them; reset all feature histories; censor each forward horizon crossing a gap or dataset boundary; no synthetic candles",
+  "windows": "original 28: raw 120m before and 120m after entry, plus causal feature snapshots; stop study requires full future coverage and reports censoring",
+  "noOptimization": true,
+  "productionChangesAllowed": false
+}

@@ -1,0 +1,30 @@
+{
+  "version": "net-usdt-1",
+  "capital": 500,
+  "limits": {"drawdown": 0.05, "exposure": 0.8, "riskPerTrade": 0.005, "dailyLoss": 0.03},
+  "execution": {"sizingRisk": 0.0045, "drawdownExit": 0.04, "dailyExit": 0.025, "maxPositions": 1, "maxStopPercent": 0.15, "feeRate": 0.001, "spreadBps": 2, "slippageBps": 3, "participationRate": 0.001},
+  "development": {"start": "2024-01-01", "endExclusive": "2025-01-01", "warmupStart": "2023-12-01"},
+  "validation": {"start": "2025-01-01", "endExclusive": "2025-04-01", "warmupStart": "2024-12-01"},
+  "final": {"start": "2025-04-01", "endExclusive": "2026-04-01", "warmupStart": "2025-03-01"},
+  "contamination": "Some development months and all validation months were observed in previous investigations. Only the final interval is reserved as unobserved. Validation is a selection screen, not independent proof.",
+  "searchBudget": {"developmentCandidates": 12, "validationCandidates": 3, "finalCandidates": 1, "stressMultipliers": [1.5, 2], "retuning": false},
+  "gates": {"developmentTrades": 30, "validationTrades": 8, "finalTrades": 20, "positiveQuarterFraction": 0.5, "top3ProfitShare": 0.5, "netWithoutBest3Positive": true, "bootstrapLowerPositive": true, "bootstrapReps": 2000, "blockDays": 5, "familyWiseAlpha": 0.05},
+  "selection": "Filter development by risk, positive net liquidation PnL, sample size, concentration, positive quarters and five-day bootstrap lower bound; Holm correction across all 12 trials. Rank survivors by net USDT minus 0.25 times losing-quarter USDT minus 0.1 times top-three winning-trade USDT. Validate at most 3; require positive net, risk, 8 trades, concentration and bootstrap. Stress development and validation at 1.5x and 2x all fees/spread/slippage; positive net and risk limits required in every run. Freeze highest validation score survivor, then evaluate final exactly once at base and both stress costs. No finalist means leave final untouched. No automatic approval even if passed.",
+  "valuation": "Objective is terminal conservative liquidation value less initial capital: mark remaining BTC at adverse SELL tick-rounded price less fee, including dust as a write-off. This is estimated wealth, not an executed liquidation. Report cash, realized, unrealized and liquidation separately.",
+  "benchmarks": "USDT and passive BTC at 100% and 80% allocation, same capital and cost model, buy at first tradable open with prior-minute volume cap, residual cash retained, final estimated liquidation; show drawdown explicitly. Final advantage must exceed USDT and any passive benchmark which satisfies all risk limits. Passive benchmarks above risk limits are contextual only.",
+  "annualization": "CAGR only for at least 365 days of continuous minute coverage; otherwise null. No sums of disjoint windows treated as compounded returns.",
+  "variants": [
+    {"id":"trend-1h","family":"trend","hours":1,"stopAtr":2,"rewardRisk":3,"holdHours":72},
+    {"id":"trend-4h","family":"trend","hours":4,"stopAtr":2.5,"rewardRisk":4,"holdHours":168},
+    {"id":"pullback-1h","family":"pullback","hours":1,"stopAtr":1.5,"rewardRisk":2.5,"holdHours":48},
+    {"id":"pullback-4h","family":"pullback","hours":4,"stopAtr":2,"rewardRisk":3,"holdHours":120},
+    {"id":"breakout-1h","family":"breakout","hours":1,"stopAtr":2,"rewardRisk":3,"holdHours":72},
+    {"id":"breakout-4h","family":"breakout","hours":4,"stopAtr":2.5,"rewardRisk":4,"holdHours":168},
+    {"id":"momentum-1h","family":"momentum","hours":1,"stopAtr":2,"rewardRisk":3,"holdHours":48},
+    {"id":"momentum-4h","family":"momentum","hours":4,"stopAtr":2.5,"rewardRisk":3,"holdHours":120},
+    {"id":"reversion-1h","family":"reversion","hours":1,"stopAtr":1.5,"rewardRisk":1.5,"holdHours":24},
+    {"id":"reversion-4h","family":"reversion","hours":4,"stopAtr":2,"rewardRisk":1.5,"holdHours":72},
+    {"id":"adaptive-1h","family":"adaptive","hours":1,"stopAtr":2,"rewardRisk":2.5,"holdHours":48},
+    {"id":"adaptive-4h","family":"adaptive","hours":4,"stopAtr":2.5,"rewardRisk":3,"holdHours":120}
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "version":"phase2-2",
+  "technicalRevision":{"previousAttempt":"reports/net-optimization-phase2-attempt-v1","reason":"PostgreSQL JSONB reordered object keys; configuration fingerprints now recursively sort keys. Signals, simulation, parameters and selection unchanged. Prior partial results and source snapshot retained. Completed matching replays may be imported with original byte hash and normalization limited to candidate fingerprint metadata.","priorIntegrationResults":{"infrastructureFailure":14,"afterInfrastructureRecovery":{"passed":13,"failed":1}},"hashAlgorithm":"SHA256 over recursively key-sorted JSON; array order retained"},
+  "seed":20261120,
+  "capital":500,
+  "limits":{"drawdown":0.05,"exposure":0.8,"riskPerTrade":0.005,"dailyLoss":0.03},
+  "execution":{"sizingRisk":0.0045,"drawdownExit":0.04,"dailyExit":0.025,"maxPositions":1,"maxStopPercent":0.15,"feeRate":0.001,"spreadBps":2,"slippageBps":3,"participationRate":0.001},
+  "gates":{"developmentTrades":30,"validationTrades":8,"continuousTrades":30,"positiveQuarterFraction":0.6666666666666666,"top3ProfitShare":0.5,"bootstrapReps":2000,"blockDays":5,"familyWiseAlpha":0.05},
+  "costs":[1,1.5,2],
+  "reserved":{"start":"2025-04-01","endExclusive":"2026-04-01","policy":"Never download, inspect or evaluate during phase 2, including for final qualifying candidates"},
+  "development":{"start":"2024-01-01","endExclusive":"2025-01-01"},
+  "continuous":{"start":"2024-07-01","endExclusive":"2025-04-01"},
+  "embargoDays":6,
+  "folds":[
+    {"id":"wf1","trainStart":"2024-01-01","trainEndExclusive":"2024-06-25","start":"2024-07-01","endExclusive":"2024-10-01"},
+    {"id":"wf2","trainStart":"2024-04-01","trainEndExclusive":"2024-09-25","start":"2024-10-01","endExclusive":"2025-01-01"},
+    {"id":"wf3","trainStart":"2024-07-01","trainEndExclusive":"2024-12-26","start":"2025-01-01","endExclusive":"2025-04-01"}
+  ],
+  "economicModel":{"lookbackDays":180,"horizonHours":24,"minSamples":12,"minDays":5,"minBlocks":5,"atrBins":[0,0.005,0.01,0.02,1],"margin":0.0005,"labels":"Nonoverlapping raw original pullback signals, next-open to 24h close; no selection by future availability; censored labels retained; only labelEnd strictly before cutoff and full signal inside training range. Development/training use monthly prior-only fits with six-day embargo. Evaluation and continuous walk-forward freeze each fold model at trainEndExclusive and do not fit on evaluated prices."},
+  "candidates":[
+    {"id":"pullback-4h","family":"pullback","hours":4,"stopAtr":2,"rewardRisk":3,"holdHours":120,"change":"original","hypothesis":"Unchanged previous reference; normalization and controls shared"},
+    {"id":"p2-confirm","family":"pullback","hours":4,"stopAtr":2,"rewardRisk":3,"holdHours":120,"change":"confirmation","hypothesis":"Wait one full bar after original pullback; require close above prior high, EMA20>EMA50 and close>EMA20"},
+    {"id":"p2-extension","family":"pullback","hours":4,"stopAtr":2,"rewardRisk":3,"holdHours":120,"change":"extension","maxExtensionAtr":0.75,"minBelowHighAtr":0.5,"hypothesis":"Avoid chasing recoveries already far above EMA20 or too close to the previous 20-bar high"},
+    {"id":"p2-vol-economy","family":"pullback","hours":4,"stopAtr":2,"rewardRisk":3,"holdHours":120,"change":"volatility","minAtrFraction":0.002,"maxAtrFraction":0.03,"minTargetCostRatio":6,"hypothesis":"Exclude very quiet or extreme 4h volatility and targets small relative to modeled round-trip costs; not an expectation forecast"},
+    {"id":"p2-learned-abstain","family":"pullback","hours":4,"stopAtr":2,"rewardRisk":3,"holdHours":120,"change":"learned","hypothesis":"Only trade ATR bins with sufficient prior nonoverlapping samples and bootstrap lower gross return above scenario costs plus economic margin"},
+    {"id":"p2-time-72h","family":"pullback","hours":4,"stopAtr":2,"rewardRisk":3,"holdHours":72,"change":"time","hypothesis":"Reduce stale exposure and recycling delay with a 72h time stop, keeping entry, SL and TP unchanged"},
+    {"id":"p2-trailing","family":"pullback","hours":4,"stopAtr":2,"rewardRisk":3,"holdHours":120,"change":"trailing","trailAtr":2,"activateAtr":1,"hypothesis":"Trail by two entry ATR after one entry ATR profit, using only previous closes, preserving initial protection and target"}
+  ],
+  "references":["momentum-1h","btc-v2","btc-v3","USDT","BTC-hold-80","BTC-hold-100"],
+  "searchBudget":{"newHypotheses":6,"retuning":false,"trainCosts":[1],"developmentAndEvaluationCosts":[1,1.5,2],"additionalSlippageReplay":{"candidate":"momentum-1h","periods":["development","continuous"],"slippageMultipliers":[2,4],"otherCostsUnchanged":true}},
+  "selection":"Freeze fold selection using training base only: risk pass, net positive, >=30 closed, net without best3 positive, top3 profit share<=0.5, bootstrap lower>0, Holm across seven candidates<=0.05; rank survivors by largest net USDT, tie lexicographic, else USDT. Training stress is not used for selection. Evaluate all fixed candidates at all three costs for comparison, never use fold evaluation to alter that fold selection. Continuous fixed candidates preserve account and positions over the three evaluation quarters, with frozen per-fold model. Qualification requires development base gates, continuous base gates (>=30 trades, >=8 closed in every evaluation quarter, >=2/3 profitable quarters, bootstrap lower>0, Holm across 8 strategies including momentum), all three continuous costs positive and risk compliant, and positive net in at least two of three independent evaluation quarters at every cost. Report all failures. Never reduce gates, never consume reserved final, never approve or deploy.",
+  "riskViolations":"Disqualify for any modeled DD/daily/exposure breach or any completed position net loss exceeding 0.5% of fill-time equity, including gaps. Also report intraholding marked net loss beyond initial trade cap; minute-close observations cannot certify tick-level limits.",
+  "aggregation":"Independent window results use fresh 500 and are descriptive; no compounding of reset accounts. Main accumulated PnL comes from a separate continuous 2024-07/2025-04 replay carrying balances and positions, including fold-selected policy. Open inventory valued conservatively with fees, adverse SELL tick and dust write-off; not an executed final liquidation. Do not annualize <365 days.",
+  "contamination":"All prices through 2025-03 were previously observed in this workspace. Walk-forward enforces causal computation, but is reused-data research, not fresh final OOS evidence. Previously analyzed 2024 data influenced hypotheses; independent confirmation is still required. No new market downloads in phase2.",
+  "baselines":"Original pullback and momentum code reused unchanged. BTC-V2/V3 original signal/protection algorithms with shared personal capital controls, dynamic risk sizing, max one position; reference overrides explicitly recorded. V3 only uses an existing model whose trainedThrough predates period start, else abstains. Any cached V2 technical signal is cloned with scenario configuration and its cost-coverage condition rechecked; fills, orders, stops, quantities and account trajectory are fully replayed for every scenario. No production selection or approval integration."
+}

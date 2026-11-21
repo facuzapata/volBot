@@ -29,7 +29,7 @@ describe('typeOrmConfig', () => {
       password: 'testpass',
       database: 'testdb',
       autoLoadEntities: true,
-      synchronize: true,
+      synchronize: false,
     });
   });
 
@@ -38,5 +38,29 @@ describe('typeOrmConfig', () => {
     jest.resetModules();
     const { typeOrmConfig } = require('./typeorm.config');
     expect(typeOrmConfig.port).toBe(5432);
+  });
+
+  it('should accept DATABASE_* variables as a fallback', () => {
+    delete process.env.DB_HOST;
+    delete process.env.DB_PORT;
+    delete process.env.DB_USERNAME;
+    delete process.env.DB_PASSWORD;
+    delete process.env.DB_NAME;
+    process.env.DATABASE_HOST = 'db';
+    process.env.DATABASE_PORT = '5433';
+    process.env.DATABASE_USERNAME = 'database_user';
+    process.env.DATABASE_PASSWORD = 'database_pass';
+    process.env.DATABASE_NAME = 'database_name';
+
+    jest.resetModules();
+    const { typeOrmConfig } = require('./typeorm.config');
+
+    expect(typeOrmConfig).toMatchObject({
+      host: 'db',
+      port: 5433,
+      username: 'database_user',
+      password: 'database_pass',
+      database: 'database_name',
+    });
   });
 });

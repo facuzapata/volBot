@@ -131,11 +131,9 @@ export function calculateMACD(
 
 // ATR - Average True Range
 export function calculateATR(candles: Candle[], period = 14): number | null {
-    console.log(`[ATR] Input: candles.length=${candles?.length}, period=${period}`);
 
     // Necesitamos al menos period + 1 velas para calcular ATR correctamente
     if (!candles || candles.length < period + 1 || period <= 0) {
-        console.log(`[ATR] FAILED: Insufficient data. candles.length=${candles?.length}, required=${period + 1}`);
         return null;
     }
 
@@ -145,7 +143,6 @@ export function calculateATR(candles: Candle[], period = 14): number | null {
     for (let i = candles.length - period; i < candles.length; i++) {
         // Asegurarse de que tenemos la vela anterior
         if (i <= 0) {
-            console.log(`[ATR] Skipping index ${i} (no previous candle)`);
             continue;
         }
 
@@ -157,7 +154,6 @@ export function calculateATR(candles: Candle[], period = 14): number | null {
             typeof current.high !== 'number' || typeof current.low !== 'number' ||
             typeof current.close !== 'number' || typeof prev.close !== 'number' ||
             isNaN(current.high) || isNaN(current.low) || isNaN(current.close) || isNaN(prev.close)) {
-            console.log(`[ATR] Invalid candle data at index ${i}:`, { current, prev });
             continue;
         }
 
@@ -166,26 +162,20 @@ export function calculateATR(candles: Candle[], period = 14): number | null {
         const lowClose = Math.abs(current.low - prev.close);
 
         const tr = Math.max(highLow, highClose, lowClose);
-        console.log(`[ATR] Index ${i}: TR=${tr.toFixed(4)} (HL=${highLow.toFixed(4)}, HC=${highClose.toFixed(4)}, LC=${lowClose.toFixed(4)})`);
 
         // Verificar que el TR sea un número válido y positivo
         if (!isNaN(tr) && isFinite(tr) && tr >= 0) {
             trs.push(tr);
         } else {
-            console.log(`[ATR] Invalid TR at index ${i}: ${tr}`);
         }
     }
 
-    console.log(`[ATR] Collected ${trs.length} TR values, required minimum: ${Math.max(1, period / 2)}`);
-
     // Necesitamos al menos period/2 valores válidos para calcular ATR
     if (trs.length < Math.max(1, period / 2)) {
-        console.log(`[ATR] FAILED: Not enough valid TR values`);
         return null;
     }
 
     const atr = trs.reduce((a, b) => a + b, 0) / trs.length;
-    console.log(`[ATR] SUCCESS: ATR=${atr.toFixed(4)}`);
     return isNaN(atr) || !isFinite(atr) || atr <= 0 ? null : atr;
 }
 

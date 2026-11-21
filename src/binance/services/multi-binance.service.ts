@@ -39,6 +39,7 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
     ) { }
 
     async onModuleInit() {
+        this.assertLiveDisabled();
         this.logger.log('🚀 Inicializando servicio multi-usuario de Binance...');
         await this.loadActiveUsers();
         await this.subscribeToRequiredSymbols();
@@ -158,6 +159,7 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
     }
 
     async createOrderForUser(userId: string, params: CreateOrderParams, movementId?: string): Promise<BinanceOrderResponse> {
+        this.assertLiveDisabled();
         const userClient = await this.getUserClient(userId);
         if (!userClient) {
             throw new Error(`Cliente no disponible para usuario ${userId}`);
@@ -441,6 +443,7 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
         tpMovementId: string,
         slMovementId: string
     ): Promise<BinanceOCOOrderResponse> {
+        this.assertLiveDisabled();
         const userClient = await this.getUserClient(userId);
         if (!userClient) {
             throw new Error(`Cliente no disponible para usuario ${userId}`);
@@ -512,6 +515,7 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
     }
 
     async cancelOCOOrderForUser(userId: string, symbol: string, orderListId: number): Promise<void> {
+        this.assertLiveDisabled();
         const userClient = await this.getUserClient(userId);
         if (!userClient) return;
         try {
@@ -525,6 +529,10 @@ export class MultiBinanceService implements OnModuleInit, OnModuleDestroy {
     /**
      * Actualizar movimiento con datos exitosos de Binance
      */
+    private assertLiveDisabled(): void {
+        throw new Error('LIVE_TRADING_COMPILED_OUT: V1 Binance execution is archived');
+    }
+
     private async updateMovementWithBinanceData(movementId: string, binanceResponse: BinanceOrderResponse): Promise<void> {
         try {
             this.logger.debug(`🔍 Respuesta completa de Binance para movimiento ${movementId}:`);

@@ -1,0 +1,28 @@
+# Explicit manual profile; does not start the legacy trading worker.
+services:
+  paper-migrate:
+    build: { context: ., dockerfile: Dockerfile.v2 }
+    command: ["node", "dist/live-paper-migrate.js"]
+    profiles: [prospective]
+    env_file: [.env.v2]
+    environment:
+      TRADING_MODE: PAPER
+      V2_DATABASE_URL: postgresql://volbot_v2:${V2_POSTGRES_PASSWORD}@postgres:5432/volbot_v2
+    depends_on: { postgres: { condition: service_healthy } }
+    restart: "no"
+  paper-worker:
+    build: { context: ., dockerfile: Dockerfile.v2 }
+    command: ["node", "dist/live-paper-worker.js"]
+    profiles: [prospective]
+    env_file: [.env.v2]
+    environment:
+      TRADING_MODE: PAPER
+      V2_DATABASE_URL: postgresql://volbot_v2:${V2_POSTGRES_PASSWORD}@postgres:5432/volbot_v2
+      V2_REDIS_URL: redis://redis:6379
+      V2_KAFKA_BROKERS: kafka:9092
+    depends_on:
+      paper-migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    restart: unless-stopped
+    stop_grace_period: 60s

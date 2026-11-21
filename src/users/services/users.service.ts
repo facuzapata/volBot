@@ -82,7 +82,8 @@ export class UsersService {
         telegramEnabled?: boolean;
         whatsappEnabled?: boolean;
     }): Promise<User> {
-        await this.userRepository.update(userId, profile);
+        const { name, telegramChatId, whatsappNumber, telegramEnabled, whatsappEnabled } = profile;
+        await this.userRepository.update(userId, { name, telegramChatId, whatsappNumber, telegramEnabled, whatsappEnabled });
         const updatedUser = await this.findById(userId);
         if (!updatedUser) {
             throw new Error(`Usuario ${userId} no encontrado`);

@@ -1,0 +1,255 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { simulationConfig, selectedStrategy } from '../config';
+import { Candle, isOrderOpen, MarketSignal } from '../domain/model';
+import { DomainEvent } from '../events/contracts';
+import {
+  EXECUTION_ADAPTER,
+  ExecutionAdapter,
+  PaperExecutionAdapter,
+} from '../execution/paper-execution.adapter';
+import {
+  CandleRow,
+  MarketSignalRow,
+  StrategyVersionRow,
+  V2User,
+  VirtualAccountRow,
+} from '../persistence/entities';
+import { StoreService } from '../persistence/store.service';
+import { MarketHistory, StrategyEngine, STRATEGY_REVISION } from '../strategy/strategy-engine';
+import { SimulationSettings } from '../market/simulation-settings';
+import { RedisCacheService } from '../market/redis-cache.service';
+import { RiskPolicy } from '../risk/risk-policy';
+import { INTERVAL_MS } from '../market/public-market.client';
+import { StrategyApprovalService, configurationHash } from '../strategy/approval.service';
+import { revisionFor } from '../strategy/versions';
+
+export function alignedHistory(history: MarketHistory, at: number): boolean {
+  return (['1m', '5m', '1h'] as const).every(timeframe => {
+    const expected = Math.floor((at + 1) / INTERVAL_MS[timeframe]) * INTERVAL_MS[timeframe] - 1;
+    return history[timeframe].slice(-1)[0]?.closeTime === expected;
+  });
+}
+
+@Injectable()
+export class RiskManagerService {
+  constructor(
+    private readonly store: StoreService,
+    private readonly policy: RiskPolicy,
+    private readonly approvals: StrategyApprovalService,
+  ) {}
+  async reserve(accountId: string, signal: MarketSignal, eventId: string): Promise<void> {
+    await this.store.accountTransaction(accountId, async (s, tx) => {
+      await this.store.once(tx, `dispatcher:${accountId}`, eventId, async () => {
+        const owner = await tx.findOneByOrFail(V2User, { id: s.account.userId });
+        if (!owner.active) s.account.entriesEnabled = false;
+        if (!await this.approvals.approved(tx, signal)) {
+          if (!s.decisions.some(d => d.id === `${accountId}:${signal.id}`)) s.decisions.push({ id: `${accountId}:${signal.id}`, accountId, signalId: signal.id, accepted: false, action:'NO_TRADE', reason: 'STRATEGY_NOT_APPROVED', at: Date.now() });
+          return;
+        }
+        const decision = this.policy.reserve(s, signal, Date.now());
+        if (!decision.accepted) return;
+        const order = s.orders.find((o) => o.signalId === signal.id && o.side === 'BUY')!;
+        await this.store.emit(
+          tx,
+          'execution.command.v1',
+          accountId,
+          {
+            accountId,
+            orderId: order.id,
+            signalTime: signal.candleTime,
+            price: signal.referencePrice,
+          },
+          signal.id,
+        );
+        await this.store.emit(
+          tx,
+          'notification.requested.v1',
+          s.account.userId,
+          {
+            userId: s.account.userId,
+            kind: 'SIGNAL_DETECTED',
+            text: `PAPER señal ${signal.strategy} BTCUSDT; reserva ${order.reservedQuote} USDT`,
+          },
+          signal.id,
+        );
+      });
+    });
+  }
+}
+@Injectable()
+export class SignalDispatcherService {
+  constructor(
+    private readonly db: DataSource,
+    private readonly risk: RiskManagerService,
+  ) {}
+  async dispatch(event: DomainEvent<'strategy.signal.created.v1'>): Promise<void> {
+    const accounts = await this.db.getRepository(VirtualAccountRow).find();
+    for (const account of accounts)
+      await this.risk.reserve(account.id, event.payload.signal, event.eventId);
+  }
+}
+@Injectable()
+export class ExecutionEngineService {
+  constructor(
+    private readonly store: StoreService,
+    @Inject(EXECUTION_ADAPTER) private readonly paper: ExecutionAdapter,
+    private readonly approvals: StrategyApprovalService,
+  ) {}
+  async command(event: DomainEvent<'execution.command.v1'>): Promise<void> {
+    const { accountId, orderId, price, signalTime } = event.payload;
+    const now=Date.now(),minute=Math.floor(now/60000)*60000;
+    await this.store.accountTransaction(accountId, async (s, tx) => {
+      await this.store.once(tx, `execution:${accountId}`, event.eventId, async () => {
+        const o = s.orders.find((x) => x.id === orderId);
+        const p = o && s.positions.find((x) => x.id === o.positionId);
+        if (!o || !p || !isOrderOpen(o)) return;
+        if(o.side==='BUY'){
+          const owner=await tx.findOneByOrFail(V2User,{id:s.account.userId});
+          if(!owner.active||!s.account.entriesEnabled){o.deferredReason=owner.active?'ENTRIES_PAUSED':'OWNER_INACTIVE';return;}
+        }
+        if (o.side === 'BUY' && !await this.approvals.approved(tx, { strategy: p.strategy, strategyRevision: p.strategyRevision ?? revisionFor(p.strategy), config: p.config })) return;
+        if (Date.now() - signalTime > p.config.signalMaxAgeMs)
+          this.paper.cancel(s, orderId, Date.now());
+        else {
+          const bar = await tx.findOneBy(CandleRow, { id: `1m:${minute-60000}` });
+          const budget=await this.store.causalBudget(tx,minute,Math.min(p.config.participationRate,simulationConfig().participationRate));
+          this.paper.execute(
+            s,
+            orderId,
+            bar?.data.close??price,
+            now,
+            budget,
+          );
+        }
+        if (o.status === 'REJECTED' || o.status === 'CANCELLED')
+          await this.store.emit(
+            tx,
+            'notification.requested.v1',
+            s.account.userId,
+            {
+              userId: s.account.userId,
+              kind: 'EXECUTION_ERROR',
+              text: `PAPER orden ${orderId}: ${o.status} ${o.rejection || ''}`,
+            },
+            event.correlationId,
+          );
+      });
+    },minute);
+  }
+}
+@Injectable()
+export class PositionManagerService {
+  constructor(
+    private readonly store: StoreService,
+    private readonly paper: PaperExecutionAdapter,
+    private readonly engine: StrategyEngine,
+    private readonly approvals: StrategyApprovalService,
+  ) {}
+  async candle(
+    event: DomainEvent<'market.candle.closed.v1'>,
+    history: MarketHistory,
+  ): Promise<void> {
+    if (event.payload.candle.timeframe !== '1m') return;
+    const accounts = await this.store.db.getRepository(VirtualAccountRow).find({order:{id:'ASC'}});
+    for (const account of accounts)
+      await this.store.accountTransaction(account.id, async (s, tx) => {
+        await this.store.once(tx, `positions:${account.id}`, event.eventId, async () => {
+        const owner=await tx.findOneByOrFail(V2User,{id:s.account.userId});
+        const permitted = new Set<string>();
+        for (const p of s.positions.filter(p => p.status !== 'CLOSED' && p.status !== 'REJECTED').sort((a,b) => configurationHash(a.strategy,a.strategyRevision??STRATEGY_REVISION,a.config).localeCompare(configurationHash(b.strategy,b.strategyRevision??STRATEGY_REVISION,b.config)))) {
+          if (await this.approvals.approved(tx, { strategy: p.strategy, strategyRevision: p.strategyRevision ?? revisionFor(p.strategy), config: p.config })) permitted.add(p.id);
+        }
+        const rate=Math.min(simulationConfig().participationRate,...s.positions.map(p=>p.config.participationRate));
+        const budget=await this.store.causalBudget(tx,event.payload.candle.openTime,rate);
+        this.paper.onCandle(s, event.payload.candle, this.engine.invalidated(history), id => permitted.has(id)&&s.account.entriesEnabled&&owner.active,budget);
+          for (const p of s.positions.filter(
+            (p) => Number(p.quantity) > 0 && Number(p.stopLoss) <= 0,
+          ))
+            await this.store.emit(
+              tx,
+              'notification.requested.v1',
+              s.account.userId,
+              {
+                userId: s.account.userId,
+                kind: 'UNPROTECTED_POSITION',
+                text: `PAPER posición sin protección ${p.id}`,
+              },
+              event.correlationId,
+            );
+        });
+      },event.payload.candle.openTime);
+  }
+}
+@Injectable()
+export class StrategyServiceV2 {
+  constructor(
+    private readonly store: StoreService,
+    private readonly engine: StrategyEngine,
+    private readonly positions: PositionManagerService,
+    private readonly settings: SimulationSettings,
+    private readonly cache: RedisCacheService,
+  ) {}
+  async history(at: number): Promise<MarketHistory> {
+    const cached = await this.cache.get<MarketHistory>(`history:${at}`);
+    if (cached) return cached;
+    const history: MarketHistory = { '1m': [], '5m': [], '1h': [] };
+    for (const timeframe of ['1m', '5m', '1h'] as const) {
+      const rows = await this.store.db
+        .getRepository(CandleRow)
+        .createQueryBuilder('c')
+        .where('c.timeframe = :timeframe', { timeframe })
+        .andWhere("(c.data->>'closeTime')::bigint <= :at", { at })
+        .orderBy('c.openTime', 'DESC')
+        .take(100)
+        .getMany();
+      history[timeframe] = rows.reverse().map((x) => x.data);
+    }
+    // Do not cache a partial snapshot while the simultaneous 5m/1h close is in transit.
+    if (alignedHistory(history, at)) await this.cache.set(`history:${at}`, history);
+    return history;
+  }
+  async candle(event: DomainEvent<'market.candle.closed.v1'>): Promise<void> {
+    const candle: Candle = event.payload.candle;
+    if (candle.timeframe !== '1m') return;
+    const history = await this.history(candle.closeTime);
+    // Position supervision always runs, regardless of entry enablement or signal availability.
+    await this.positions.candle(event, history);
+    const strategy = selectedStrategy();
+    if ((strategy === 'btc-v2'||strategy==='btc-v3') && !alignedHistory(history, candle.closeTime)) {
+      if (event.payload.recovered) return;
+      throw new Error('WAITING_FOR_ALIGNED_CLOSED_TIMEFRAMES');
+    }
+    const signal = this.engine.evaluate(history, strategy, this.settings.config);
+    await this.store.db.transaction(async (tx) => {
+      const row = await tx.findOneOrFail(StrategyVersionRow, {
+        where: { id: strategy },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (candle.closeTime <= row.state.lastCandleTime) return;
+      await this.store.once(tx, `strategy:${strategy}`, event.eventId, async () => {
+        const risingEdge = !!signal && !row.state.eligible;
+        row.state = { ...row.state, eligible: !!signal, lastCandleTime: candle.closeTime,
+          lastDecision:this.engine.lastV3Assessment?{decision:this.engine.lastV3Assessment.decision,reason:this.engine.lastV3Assessment.reason,features:this.engine.lastV3Assessment.features}:undefined,
+          configuration: this.settings.config, configurationHash: configurationHash(strategy, revisionFor(strategy), this.settings.config) };
+        if (
+          risingEdge &&
+          !event.payload.recovered &&
+          Date.now() - candle.closeTime <= simulationConfig().signalMaxAgeMs
+        ) {
+          await tx.insert(MarketSignalRow, { id: signal!.id, data: signal! });
+          await this.store.emit(
+            tx,
+            'strategy.signal.created.v1',
+            'BTCUSDT',
+            { signal: signal! },
+            signal!.id,
+          );
+          row.state.lastSignalTime = candle.closeTime;
+        }
+        row.revision = revisionFor(strategy);
+        await tx.save(row);
+      });
+    });
+  }
+}

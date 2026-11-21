@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { INestApplication } from '@nestjs/common';
+import { setupApi } from '../src/v2/api/setup';
 
 let cachedApp: INestApplication;
 
@@ -9,6 +10,7 @@ async function bootstrap() {
         const app = await NestFactory.create(AppModule, {
             logger: ['error', 'warn', 'log'],
         });
+        setupApi(app);
         await app.init();
         cachedApp = app;
     }

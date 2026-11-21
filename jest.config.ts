@@ -4,7 +4,7 @@ import type { Config } from 'jest';
 const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   roots: ['<rootDir>/src', '<rootDir>/test'],
-  testRegex: '(/__tests__/.*|(\\.|/)(spec|test|e2e-spec))\\.ts$',
+  testRegex: '(/__tests__/.*|(\\.|/)(spec|test|e2e-spec|integration-spec))\\.ts$',
   transform: {
     '^.+\\.(t|j)s$': 'ts-jest',
   },

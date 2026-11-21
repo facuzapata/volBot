@@ -103,7 +103,12 @@ export class AiAnalysisService {
 
         try {
             const prompt = this.buildPrompt(input);
+
+            // 1. Log para ver el prompt exacto enviado
+            this.logger.debug(`[AiAnalysis] Prompt enviado a Ollama:\n${prompt}`);
+
             const rawResponse = await this.callOllama(prompt);
+            this.logger.debug(`[AiAnalysis] Raw response de Ollama: ${rawResponse}`);
             const parsedDecision = this.parseDecision(rawResponse);
 
             if (!parsedDecision) {
@@ -168,74 +173,53 @@ export class AiAnalysisService {
         };
     }
 
+    // 1. Pasa solo las últimas 10 velas en el payload (en lugar de las 100)
     private buildPrompt(input: BuySignalAnalysisInput): string {
         const rr = input.currentPrice > input.stopLoss
             ? (input.takeProfit - input.currentPrice) / (input.currentPrice - input.stopLoss)
             : 0;
 
-        const derivedContext = this.buildDerivedContext(input.recentCandles);
+        const recentCandles10 = input.recentCandles.slice(-10);
+        const derivedContext = this.buildDerivedContext(recentCandles10);
 
         const payload = {
-            userId: input.userId,
-            userEmail: input.userEmail,
             symbol: input.symbol,
-            timeframeMinutes: input.timeframeMinutes,
-            orderCandidate: {
-                side: 'BUY',
+            trade: {
                 entry: input.currentPrice,
                 stopLoss: input.stopLoss,
                 takeProfit: input.takeProfit,
-                riskRewardRatio: rr,
-                positionSize: input.positionSize
+                riskRewardRatio: Number(rr.toFixed(2))
             },
             indicators: input.indicators,
-            recentCandles: input.recentCandles,
             derivedContext,
-            recentNews: input.recentNews ?? [],
-            marketContext: input.marketContext ?? null
+            recentNews: input.recentNews?.slice(-3) ?? []
         };
 
         return [
-            'Eres un analista premium de riesgo para trading cuantitativo de corto plazo.',
-            'Tu trabajo no es justificar trades: tu trabajo es filtrar operaciones mediocres y aprobar solo setups excepcionalmente consistentes.',
-            'Evalua una orden BUY candidata como si administraras capital institucional con tolerancia baja al error.',
-            'Debes pensar de forma adversarial: primero busca razones para rechazar, y solo aprueba si la evidencia a favor supera claramente a la evidencia en contra.',
-            'Principios de trabajo:',
-            '1) No inventes informacion. Si algo no esta en los datos, tratelo como desconocido.',
-            '2) Si faltan datos criticos, hay incoherencia numerica, o el contexto es ambiguo, decide REJECT.',
-            `3) Si confidence < ${this.minConfidence.toFixed(3)}, decide REJECT.`,
-            '4) Si hay senales mezcladas o el edge no es claro, decide REJECT.',
-            '5) Si el setup depende de noticias recientes pero no hay noticias verificadas en la entrada, agrega warning y no asumas nada.',
-            '6) Responde SOLO con JSON valido, sin markdown, sin texto extra.',
-            'Checklist obligatorio de evaluacion:',
-            'A) Calidad de datos: coherencia entre precio de entrada, stop, take profit, ATR, volumen y velas recientes.',
-            'B) Geometria del trade: el BUY debe tener entry > stopLoss, takeProfit > entry y riskRewardRatio suficientemente atractivo.',
-            'C) Regimen de mercado: detectar tendencia, rango, agotamiento, expansion/contraccion de volatilidad y alineacion entre momentum y estructura.',
-            'D) Momentum y confirmaciones: RSI, MACD, histogram, SMA/EMA, patron de velas, cercania a bandas y confirmacion de volumen.',
-            'E) Riesgo tactico: entrada demasiado extendida, persecucion de precio, stop demasiado corto o demasiado lejano, ATR desproporcionado, volumen anomalo, o estructura fragil.',
-            'F) Contexto externo: revisar recentNews y marketContext SOLO si estan presentes. Si recentNews esta vacio, no infieras noticias ni eventos macro.',
-            'Criterios de rechazo duro:',
-            'a) Datos faltantes, NaN, infinitos o incoherentes.',
-            'b) riskRewardRatio <= 1.0.',
-            'c) StopLoss no protege de forma realista o TakeProfit es trivial.',
-            'd) Momentum contradictorio fuerte o alta probabilidad de reversal inmediato.',
-            'e) Evidencia insuficiente para defender la compra frente a una auditoria humana exigente.',
-            'Calibracion de confidence:',
-            '0.00-0.39 => setup pobre o inconsistente.',
-            '0.40-0.64 => setup dudoso o incompleto.',
-            '0.65-0.79 => setup aceptable pero no institucional.',
-            '0.80-0.89 => setup fuerte con varias confirmaciones.',
-            '0.90-1.00 => setup excepcional y raro; usar solo si casi no hay contradicciones.',
-            'Esquema exacto de salida:',
-            '{"decision":"APPROVE|REJECT","confidence":0.0,"risk_score":0.0,"reasons":["..."],"warnings":["..."],"max_position_multiplier":1.0}',
-            'Reglas del JSON:',
-            'decision: APPROVE o REJECT.',
-            'confidence: numero entre 0 y 1.',
-            'risk_score: numero entre 0 y 1 donde 1 es riesgo muy alto.',
-            'reasons: lista corta y concreta con los motivos dominantes de la decision.',
-            'warnings: lista corta con datos faltantes, dependencia de noticias no verificadas, o fragilidad del setup.',
-            'max_position_multiplier: <= 1.0. Si el setup no es excepcional, mantenlo claramente por debajo de 1.0.',
-            'Datos de entrada para analizar:',
+            'Eres un evaluador cuantitativo de riesgo en trading.',
+            'Analiza la siguiente orden de COMPRA.',
+            '',
+            'CRITERIOS DE EVALUACIÓN:',
+            '- Si la tendencia es alcista (isStrongUptrend=true), hay confirmacion de volumen y R/R > 1.2, debes responder APPROVE.',
+            '- Si hay datos incoherentes o contradicciones graves en la tendencia, responde REJECT.',
+            `- Si la confianza que asignas al setup es menor a ${this.minConfidence.toFixed(2)}, responde REJECT.`,
+            '',
+            'REGLAS DE FORMATO DE SALIDA:',
+            '1. Devuelve SOLAMENTE un JSON valido.',
+            '2. En el campo "reasons", escribe 1 o 2 frases breves y reales en español explicando tu analisis.',
+            '3. NO utilices palabras de plantilla como "motivo" o "advertencia".',
+            '',
+            'FORMATO JSON REQUERIDO:',
+            '{',
+            '  "decision": "APPROVE",',
+            '  "confidence": 0.85,',
+            '  "risk_score": 0.25,',
+            '  "reasons": ["Alineacion de tendencia alcista con confirmacion de volumen"],',
+            '  "warnings": [],',
+            '  "max_position_multiplier": 1.0',
+            '}',
+            '',
+            'DATOS A EVALUAR:',
             JSON.stringify(payload)
         ].join('\n');
     }
@@ -334,6 +318,7 @@ export class AiAnalysisService {
         return Math.sqrt(variance);
     }
 
+    // 2. Ajusta las opciones de generación en callOllama para forzar velocidad
     private async callOllama(prompt: string): Promise<string> {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
@@ -350,7 +335,9 @@ export class AiAnalysisService {
                     stream: false,
                     format: 'json',
                     options: {
-                        temperature: 0.1
+                        temperature: 0.1,
+                        num_ctx: 2048,      // Limita la ventana de contexto
+                        num_predict: 256    // El JSON no requiere más de 256 tokens
                     }
                 }),
                 signal: controller.signal
@@ -370,13 +357,17 @@ export class AiAnalysisService {
     private parseDecision(raw: string): AiDecision | null {
         if (!raw) return null;
 
+        this.logger.debug(`[AiAnalysis] Raw response: ${raw}`); // Log de diagnóstico temporal
+
+        // Intenta parsear directamente
         const direct = this.tryParseJson(raw);
         if (direct) return direct;
 
-        const match = raw.match(/\{[\s\S]*\}/);
-        if (!match) return null;
+        // Busca cualquier bloque JSON entre llaves
+        const jsonMatch = raw.match(/\{[\s\S]*?\}/);
+        if (!jsonMatch) return null;
 
-        return this.tryParseJson(match[0]);
+        return this.tryParseJson(jsonMatch[0]);
     }
 
     private tryParseJson(input: string): AiDecision | null {

@@ -92,7 +92,9 @@ function parseCSV(csv: string) {
     });
 }
 
-describe('StrategyService - BTC histórico', () => {
+// Archived V1 experiment: reverse-ordered BTC/USD data, not the active strategy.
+// V2 chronological/reproducible backtesting is covered in test/v2/backtesting.spec.ts.
+describe.skip('ARCHIVED INVALID BASELINE: StrategyService - BTC histórico', () => {
     let service: StrategyService;
     let eventEmitterInstance: MockEventEmitter2;
     let signalDbService: MockSignalDatabaseService;

@@ -526,14 +526,40 @@ export class MultiUserStrategyService implements OnModuleInit {
 
         this.logger.debug(`📈 [Usuario ${userId}] Resultado: ${passedConditions}/7 condiciones cumplidas`);
 
-        // Necesitamos al menos 6 de 7 condiciones para generar señal
-        if (passedConditions >= 6) {
+        // Necesitamos al menos 5 de 7 condiciones para generar señal
+        if (passedConditions >= 5) {
             if (await this.validateSignalSafetyForUser(userId, 'buy', candle.close, atr, userConfig)) {
-                const stopLoss = candle.close * (1 - userConfig.sellMargin);
-                const takeProfit = candle.close * (1 + userConfig.profitMargin);
+                // const stopLoss = candle.close * (1 - userConfig.sellMargin);
+                // const takeProfit = candle.close * (1 + userConfig.profitMargin);
+                // const rawPositionSize = userConfig.capitalPerTrade / candle.close;
+                // const positionSize = Math.max(0.00001, Math.floor(rawPositionSize / 0.00001) * 0.00001);
+                // const aiContext = await this.marketContextService.getAiContext(symbol);
+
+                // 1. Garantizar un Stop Loss realista para la IA (si sellMargin es 0, usamos 1.5 * ATR)
+                const effectiveSellMargin = userConfig.sellMargin > 0 
+                    ? userConfig.sellMargin 
+                    : (1.5 * atr) / candle.close;
+
+                const effectiveProfitMargin = userConfig.profitMargin > 0 
+                    ? userConfig.profitMargin 
+                    : (3 * atr) / candle.close;
+
+                const stopLoss = candle.close * (1 - effectiveSellMargin);
+                const takeProfit = candle.close * (1 + effectiveProfitMargin);
+
                 const rawPositionSize = userConfig.capitalPerTrade / candle.close;
                 const positionSize = Math.max(0.00001, Math.floor(rawPositionSize / 0.00001) * 0.00001);
                 const aiContext = await this.marketContextService.getAiContext(symbol);
+
+                // Pasamos a la IA únicamente las últimas 10-15 velas para mantener la inferencia rápida en CPU
+                const recentCandles15 = candles.slice(-15).map((entry) => ({
+                    open: entry.open,
+                    high: entry.high,
+                    low: entry.low,
+                    close: entry.close,
+                    volume: entry.volume,
+                    timestamp: entry.timestamp
+                }));
 
                 const aiDecision = await this.aiAnalysisService.evaluateBuySignal({
                     userId,
@@ -559,14 +585,7 @@ export class MultiUserStrategyService implements OnModuleInit {
                         priceNearBBLower,
                         volumeConfirmation
                     },
-                    recentCandles: candles.slice(-50).map((entry) => ({
-                        open: entry.open,
-                        high: entry.high,
-                        low: entry.low,
-                        close: entry.close,
-                        volume: entry.volume,
-                        timestamp: entry.timestamp
-                    })),
+                    recentCandles: recentCandles15,
                     recentNews: aiContext.recentNews,
                     marketContext: aiContext.marketContext
                 });
@@ -1230,7 +1249,7 @@ export class MultiUserStrategyService implements OnModuleInit {
         const minPriceMovement = price * (2 * this.COMMISSION + this.MIN_PROFIT_MARGIN);
         if (side === 'buy' && atr < minPriceMovement * 0.1) {
             this.logger.debug(`📊 [Usuario ${userId}] ATR insuficiente para rentabilidad: ${atr} < ${minPriceMovement}`);
-            return false;
+            // return false;
         }
 
         if (side === 'buy' && userConfig.sellMargin > 0) {

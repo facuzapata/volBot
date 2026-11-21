@@ -1,20 +1,12 @@
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json } from 'express';
 import { AppModule } from './app.module';
+import { setupApi } from './v2/api/setup';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('VolBot API')
-    .setDescription('API para dashboard multi-usuario (auth, me, admin)')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, document);
-
-  await app.listen(process.env.PORT ?? 3000);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.use(json({ limit: '20mb' }));
+  setupApi(app);
+  await app.listen(Number(process.env.V2_API_PORT || 3100), '0.0.0.0');
 }
-bootstrap();
+void bootstrap();

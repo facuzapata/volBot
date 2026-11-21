@@ -6,9 +6,9 @@ services:
     container_name: profit_postgres
     restart: always
     environment:
-      POSTGRES_DB: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DB_NAME:-${DATABASE_NAME:-postgres}}
+      POSTGRES_USER: ${DB_USERNAME:-${DATABASE_USERNAME:-postgres}}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${DATABASE_PASSWORD:-postgres}}
     ports:
       - "5432:5432"
     volumes:
@@ -44,6 +44,12 @@ services:
       - /app/node_modules
     env_file:
       - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-${DATABASE_USERNAME:-postgres}}
+      DB_PASSWORD: ${DB_PASSWORD:-${DATABASE_PASSWORD:-postgres}}
+      DB_NAME: ${DB_NAME:-${DATABASE_NAME:-postgres}}
     depends_on:
       - db
       - redis

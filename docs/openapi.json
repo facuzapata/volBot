@@ -1,0 +1,2858 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "description": "Iniciar sesión. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AuthControllerV2_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "summary": "Iniciar sesión",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/api/me": {
+      "get": {
+        "description": "Consultar mi perfil público. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_profile",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUserDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar mi perfil público",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/config": {
+      "get": {
+        "description": "Consultar mis límites. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_config",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountConfigResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar mis límites",
+        "tags": [
+          "Paper account"
+        ]
+      },
+      "patch": {
+        "description": "Cambiar máximo simultáneo y USDT por operación. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_configure",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradingConfigDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountConfigResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cambiar máximo simultáneo y USDT por operación",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/entries": {
+      "patch": {
+        "description": "Iniciar o pausar nuevas entradas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_entries",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntriesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountConfigResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Iniciar o pausar nuevas entradas",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/balance": {
+      "get": {
+        "description": "Consultar saldo virtual disponible, reservado e inventario asignado. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_balance",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar saldo virtual disponible, reservado e inventario asignado",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/positions": {
+      "get": {
+        "description": "Consultar posiciones propias, abiertas y cerradas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_positions",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionsPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar posiciones propias, abiertas y cerradas",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/positions/{id}/close": {
+      "post": {
+        "description": "Solicitar cierre simulado en la próxima vela. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_close",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID de posición propia",
+            "schema": {
+              "example": "<account>:<signal>:position",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Solicitar cierre simulado en la próxima vela",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/orders": {
+      "get": {
+        "description": "Consultar historial de órdenes simuladas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_orders",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar historial de órdenes simuladas",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/orders/{id}/cancel": {
+      "post": {
+        "description": "Cancelar una orden simulada pendiente. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID de orden propia",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancelar una orden simulada pendiente",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/fills": {
+      "get": {
+        "description": "Consultar ejecuciones y comisiones propias. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_fills",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FillsPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar ejecuciones y comisiones propias",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/ledger": {
+      "get": {
+        "description": "Consultar movimientos contables propios. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_ledger",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar movimientos contables propios",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/decisions": {
+      "get": {
+        "description": "Consultar aceptación o rechazo de señales para mi cuenta. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_decisions",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar aceptación o rechazo de señales para mi cuenta",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/stats": {
+      "get": {
+        "description": "Consultar P&L neto incluyendo pérdidas y posiciones abiertas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MeControllerV2_stats",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar P&L neto incluyendo pérdidas y posiciones abiertas",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/strategies": {
+      "get": {
+        "operationId": "MarketControllerV2_strategies",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StrategyResponseDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Estrategias versionadas disponibles",
+        "tags": [
+          "Market and strategies"
+        ]
+      }
+    },
+    "/api/market/status": {
+      "get": {
+        "description": "BTCUSDT: último precio cerrado, intervalos y estado del sistema. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MarketControllerV2_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketStatusDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "BTCUSDT: último precio cerrado, intervalos y estado del sistema",
+        "tags": [
+          "Market and strategies"
+        ]
+      }
+    },
+    "/api/market/candles": {
+      "get": {
+        "description": "Consultar velas cerradas BTCUSDT por temporalidad. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MarketControllerV2_candles",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "timeframe",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "1m",
+              "type": "string",
+              "enum": [
+                "1m",
+                "5m",
+                "1h"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandlesPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar velas cerradas BTCUSDT por temporalidad",
+        "tags": [
+          "Market and strategies"
+        ]
+      }
+    },
+    "/api/signals": {
+      "get": {
+        "description": "Consultar señales de mercado compartidas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "MarketControllerV2_signals",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar señales de mercado compartidas",
+        "tags": [
+          "Market and strategies"
+        ]
+      }
+    },
+    "/api/backtests": {
+      "post": {
+        "description": "Ejecutar y persistir backtest cronológico BTCUSDT. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "BacktestingController_run",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ejecutar y persistir backtest cronológico BTCUSDT",
+        "tags": [
+          "Backtesting"
+        ]
+      }
+    },
+    "/api/backtests/{id}": {
+      "get": {
+        "description": "Consultar un reporte de backtest propio. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "BacktestingController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar un reporte de backtest propio",
+        "tags": [
+          "Backtesting"
+        ]
+      }
+    },
+    "/api/admin/strategy-validations": {
+      "post": {
+        "description": "Registrar evaluación pendiente; nunca habilita por métricas automáticamente. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_registerValidation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterValidationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Registrar evaluación pendiente; nunca habilita por métricas automáticamente",
+        "tags": [
+          "Administration"
+        ]
+      },
+      "get": {
+        "description": "Consultar aprobaciones y revocaciones persistentes. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_validations",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar aprobaciones y revocaciones persistentes",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
+    "/api/admin/strategy-validations/{id}/decision": {
+      "post": {
+        "description": "Aprobar o revocar con revisión humana explícita de versión y configuración. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_decision",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideValidationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Aprobar o revocar con revisión humana explícita de versión y configuración",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
+    "/api/admin/users": {
+      "post": {
+        "description": "Crear usuario y cuenta virtual aislada. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUserDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Crear usuario y cuenta virtual aislada",
+        "tags": [
+          "Administration"
+        ]
+      },
+      "get": {
+        "description": "Listar usuarios sin secretos. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_users",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsersPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Listar usuarios sin secretos",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
+    "/api/admin/users/{id}/status": {
+      "patch": {
+        "description": "Activar o desactivar acceso y nuevas entradas de un usuario. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_status",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntriesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUserDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Activar o desactivar acceso y nuevas entradas de un usuario",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
+    "/api/admin/users/{id}/notifications": {
+      "patch": {
+        "description": "Vincular chat privado Telegram verificado por administrador. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_notifications",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationSettingsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUserDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Vincular chat privado Telegram verificado por administrador",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
+    "/api/admin/dead-letters": {
+      "get": {
+        "description": "Consultar entregas agotadas sin revelar payloads privados. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_dead",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar entregas agotadas sin revelar payloads privados",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
+    "/api/admin/dead-letters/{id}/replay": {
+      "post": {
+        "description": "Reintentar evento conservando su identidad. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "operationId": "AdminControllerV2_replay",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reintentar evento conservando su identidad",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
+    "/api/health/live": {
+      "get": {
+        "operationId": "HealthController_live",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Liveness del proceso API",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependencias o mercado no disponibles"
+          }
+        },
+        "summary": "Readiness de base, caché y pipeline",
+        "tags": [
+          "Health"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "VolBot V2 — PAPER ONLY",
+    "description": "",
+    "version": "2.0.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "admin@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "use-a-unique-password",
+            "minLength": 12
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "PublicUserDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "example": "trader@example.com"
+          },
+          "name": {
+            "type": "string",
+            "example": "Trader A"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "admin"
+            ]
+          },
+          "active": {
+            "type": "boolean",
+            "example": true
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name",
+          "role",
+          "active"
+        ]
+      },
+      "TokenDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "Short-lived bearer token",
+            "example": "<JWT>"
+          },
+          "user": {
+            "$ref": "#/components/schemas/PublicUserDto"
+          }
+        },
+        "required": [
+          "accessToken",
+          "user"
+        ]
+      },
+      "AccountConfigResponseDto": {
+        "type": "object",
+        "properties": {
+          "maxPositions": {
+            "type": "number",
+            "example": 5
+          },
+          "usdtPerTrade": {
+            "type": "string",
+            "example": "30.000000000000"
+          },
+          "entriesEnabled": {
+            "type": "boolean",
+            "example": false
+          }
+        },
+        "required": [
+          "maxPositions",
+          "usdtPerTrade",
+          "entriesEnabled"
+        ]
+      },
+      "TradingConfigDto": {
+        "type": "object",
+        "properties": {
+          "maxPositions": {
+            "type": "number",
+            "example": 5,
+            "minimum": 1,
+            "maximum": 20
+          },
+          "usdtPerTrade": {
+            "type": "number",
+            "example": 30,
+            "minimum": 5,
+            "maximum": 100000
+          }
+        }
+      },
+      "EntriesDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "example": true,
+            "description": "Only controls new entries; existing positions remain supervised."
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "BalanceDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "example": "PAPER",
+            "enum": [
+              "PAPER"
+            ]
+          },
+          "availableUSDT": {
+            "type": "string",
+            "example": "500.000000000000"
+          },
+          "reservedUSDT": {
+            "type": "string",
+            "example": "30.000000000000"
+          },
+          "assignedBTC": {
+            "type": "string",
+            "example": "0.000300000000"
+          },
+          "reservedBTC": {
+            "type": "string",
+            "example": "0.000300000000",
+            "description": "Assigned quantity covered by a pending exit"
+          },
+          "equityUSDT": {
+            "type": "number",
+            "example": 500.1
+          },
+          "entriesEnabled": {
+            "type": "boolean",
+            "example": false
+          }
+        },
+        "required": [
+          "mode",
+          "availableUSDT",
+          "reservedUSDT",
+          "assignedBTC",
+          "reservedBTC",
+          "equityUSDT",
+          "entriesEnabled"
+        ]
+      },
+      "Object": {
+        "type": "object",
+        "properties": {}
+      },
+      "PositionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable, idempotent domain identifier"
+          },
+          "status": {
+            "type": "string",
+            "example": "OPEN"
+          },
+          "accountId": {
+            "type": "string"
+          },
+          "signalId": {
+            "type": "string"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "legacy-v1",
+              "btc-v2",
+              "btc-v3",
+              "trend-reference"
+            ]
+          },
+          "quantity": {
+            "type": "string",
+            "description": "Current remaining BTC, decimal string",
+            "example": "0.000300000000"
+          },
+          "averageEntry": {
+            "type": "string"
+          },
+          "entryQuantity": {
+            "type": "string"
+          },
+          "entryQuote": {
+            "type": "string"
+          },
+          "entryFees": {
+            "type": "string"
+          },
+          "remainingCost": {
+            "type": "string"
+          },
+          "realizedPnl": {
+            "type": "string"
+          },
+          "stopLoss": {
+            "type": "string"
+          },
+          "takeProfit": {
+            "type": "string"
+          },
+          "highWater": {
+            "type": "string"
+          },
+          "atr": {
+            "type": "string"
+          },
+          "openedAt": {
+            "type": "number"
+          },
+          "closedAt": {
+            "type": "number"
+          },
+          "exitReason": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "executionRisk": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Fill-time geometry, gross risk, net stop loss, round-trip costs and risk cap; stop gaps can exceed the estimate."
+          }
+        },
+        "required": [
+          "id",
+          "accountId",
+          "signalId",
+          "strategy",
+          "quantity",
+          "averageEntry",
+          "entryQuantity",
+          "entryQuote",
+          "entryFees",
+          "remainingCost",
+          "realizedPnl",
+          "stopLoss",
+          "takeProfit",
+          "highWater",
+          "atr",
+          "openedAt",
+          "config"
+        ]
+      },
+      "PositionsPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Domain records scoped to the authenticated account. See docs/database.md for full fields.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PositionDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "OrderDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable, idempotent domain identifier"
+          },
+          "status": {
+            "type": "string",
+            "example": "OPEN"
+          },
+          "positionId": {
+            "type": "string"
+          },
+          "signalId": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "MARKET",
+              "LIMIT",
+              "PROTECTION"
+            ]
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "filledQuantity": {
+            "type": "string"
+          },
+          "reservedQuote": {
+            "type": "string"
+          },
+          "limitPrice": {
+            "type": "string"
+          },
+          "deferredReason": {
+            "type": "string"
+          },
+          "executionRisk": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "reason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "rejection": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "positionId",
+          "signalId",
+          "side",
+          "type",
+          "quantity",
+          "filledQuantity",
+          "reservedQuote",
+          "reason",
+          "createdAt"
+        ]
+      },
+      "OrdersPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Domain records scoped to the authenticated account. See docs/database.md for full fields.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "FillDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable, idempotent domain identifier"
+          },
+          "status": {
+            "type": "string",
+            "example": "OPEN"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "positionId": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL"
+            ]
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "price": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "commission": {
+            "type": "string"
+          },
+          "commissionAsset": {
+            "type": "string",
+            "enum": [
+              "USDT",
+              "BTC"
+            ]
+          },
+          "at": {
+            "type": "number"
+          },
+          "executionPhase": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "INTRABAR",
+              "CLOSE",
+              "DECISION"
+            ]
+          },
+          "liquiditySourceCloseTime": {
+            "type": "object",
+            "nullable": true,
+            "description": "Closed timestamp of the prior minute supplying the causal capacity proxy; never current/future candle volume."
+          },
+          "liquidityCapacity": {
+            "type": "number",
+            "description": "Shared BTC capacity for this symbol/minute, across phases and operational accounts."
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "positionId",
+          "side",
+          "quantity",
+          "price",
+          "quote",
+          "commission",
+          "commissionAsset",
+          "at"
+        ]
+      },
+      "FillsPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Domain records scoped to the authenticated account. See docs/database.md for full fields.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FillDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "LedgerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable, idempotent domain identifier"
+          },
+          "status": {
+            "type": "string",
+            "example": "OPEN"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "positionId": {
+            "type": "string"
+          },
+          "asset": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "USDT"
+            ]
+          },
+          "availableDelta": {
+            "type": "string"
+          },
+          "reservedDelta": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "positionId",
+          "asset",
+          "availableDelta",
+          "reservedDelta",
+          "reason",
+          "at"
+        ]
+      },
+      "LedgerPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Domain records scoped to the authenticated account. See docs/database.md for full fields.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedgerDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "RecordDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable, idempotent domain identifier"
+          },
+          "status": {
+            "type": "string",
+            "example": "OPEN"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "PageResponseDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Domain records scoped to the authenticated account. See docs/database.md for full fields.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "StatsDto": {
+        "type": "object",
+        "properties": {
+          "netRealizedPnl": {
+            "type": "number",
+            "example": 1.25
+          },
+          "unrealizedPnl": {
+            "type": "number",
+            "example": -0.1
+          },
+          "equity": {
+            "type": "number",
+            "example": 501.15
+          },
+          "closedTrades": {
+            "type": "number",
+            "example": 10
+          },
+          "profitFactor": {
+            "type": "object",
+            "example": 1.2,
+            "nullable": true
+          },
+          "expectancy": {
+            "type": "number",
+            "example": 0.125
+          },
+          "winRate": {
+            "type": "number",
+            "example": 0.6
+          },
+          "maxDrawdown": {
+            "type": "object",
+            "nullable": true,
+            "description": "Null when an equity curve has not been measured."
+          },
+          "totalCommissions": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "netRealizedPnl",
+          "unrealizedPnl",
+          "equity",
+          "closedTrades",
+          "profitFactor",
+          "expectancy",
+          "winRate",
+          "maxDrawdown",
+          "totalCommissions"
+        ]
+      },
+      "StrategyResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "legacy-v1",
+              "btc-v2",
+              "btc-v3",
+              "trend-reference"
+            ]
+          },
+          "revision": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "lastEvaluationAt": {
+            "type": "number",
+            "description": "Last evaluated closed-candle timestamp in UTC milliseconds"
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "approvalStatus": {
+            "type": "string",
+            "enum": [
+              "APPROVED",
+              "PENDING",
+              "REVOKED",
+              "UNREGISTERED"
+            ]
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "configurationHash": {
+            "type": "string"
+          },
+          "calibrationReady": {
+            "type": "boolean"
+          },
+          "lastDecision": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "description",
+          "active",
+          "lastEvaluationAt",
+          "eligible",
+          "approvalStatus",
+          "configuration",
+          "configurationHash",
+          "calibrationReady"
+        ]
+      },
+      "MarketStatusDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "example": "PAPER"
+          },
+          "database": {
+            "type": "boolean"
+          },
+          "redis": {
+            "type": "boolean"
+          },
+          "marketFresh": {
+            "type": "boolean"
+          },
+          "outboxPending": {
+            "type": "number"
+          },
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT"
+            ]
+          },
+          "latestPrice": {
+            "type": "object",
+            "example": 95000,
+            "nullable": true
+          },
+          "intervals": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Latest closed candle for 1m, 5m and 1h; null until initialized."
+          }
+        },
+        "required": [
+          "status",
+          "mode",
+          "database",
+          "redis",
+          "marketFresh",
+          "outboxPending",
+          "symbol",
+          "latestPrice",
+          "intervals"
+        ]
+      },
+      "MarketCandleDto": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT"
+            ]
+          },
+          "openTime": {
+            "type": "number",
+            "example": 1735689600000
+          },
+          "closeTime": {
+            "type": "number",
+            "example": 1735689659999
+          },
+          "open": {
+            "type": "number",
+            "example": 95000
+          },
+          "high": {
+            "type": "number",
+            "example": 95100
+          },
+          "low": {
+            "type": "number",
+            "example": 94900
+          },
+          "close": {
+            "type": "number",
+            "example": 95050
+          },
+          "volume": {
+            "type": "number",
+            "example": 10
+          },
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "1m",
+              "5m",
+              "1h"
+            ]
+          }
+        },
+        "required": [
+          "symbol",
+          "openTime",
+          "closeTime",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume",
+          "timeframe"
+        ]
+      },
+      "CandlesPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Domain records scoped to the authenticated account. See docs/database.md for full fields.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandleDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "CandleDto": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT"
+            ]
+          },
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "1m"
+            ]
+          },
+          "openTime": {
+            "type": "number",
+            "example": 1735689600000
+          },
+          "closeTime": {
+            "type": "number",
+            "example": 1735689659999
+          },
+          "open": {
+            "type": "number",
+            "example": 95000
+          },
+          "high": {
+            "type": "number",
+            "example": 95100
+          },
+          "low": {
+            "type": "number",
+            "example": 94900
+          },
+          "close": {
+            "type": "number",
+            "example": 95050
+          },
+          "volume": {
+            "type": "number",
+            "example": 10
+          }
+        },
+        "required": [
+          "symbol",
+          "timeframe",
+          "openTime",
+          "closeTime",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ]
+      },
+      "BacktestDto": {
+        "type": "object",
+        "properties": {
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "legacy-v1",
+              "btc-v2",
+              "btc-v3",
+              "trend-reference"
+            ]
+          },
+          "btcV3": {
+            "type": "object",
+            "additionalProperties": true,
+            "example": {
+              "revision": "2026-11-20.v3.1",
+              "horizonMinutes": 60,
+              "pullbackLookback5m": 12,
+              "minPullbackAtr": 0.5,
+              "maxPullbackAtr": 2.5,
+              "maxRangePosition5m": 0.75,
+              "maxRangePosition1m": 0.8,
+              "minAtr5mFraction": 0.001,
+              "maxAtr5mFraction": 0.015,
+              "trendSlopeHours": 3,
+              "stopAtr5m": 1.5,
+              "swingLookback5m": 6,
+              "swingBufferAtr": 0.1,
+              "targetAtr5m": 2,
+              "economicMargin": 0.0005,
+              "minCalibrationSamples": 20,
+              "minCalibrationDays": 5
+            },
+            "description": "Experimental versioned thresholds. Calibration is server-configured and hash verified; clients cannot supply forecasts or approvals."
+          },
+          "maxRiskPerTrade": {
+            "type": "number",
+            "example": 0.005,
+            "minimum": 0.000001,
+            "maximum": 0.1,
+            "description": "Maximum estimated net stop loss / marked account equity, revalidated before fill."
+          },
+          "initialCapital": {
+            "type": "number",
+            "example": 500
+          },
+          "maxPositions": {
+            "type": "number",
+            "example": 5
+          },
+          "usdtPerTrade": {
+            "type": "number",
+            "example": 30
+          },
+          "feeRate": {
+            "type": "number",
+            "example": 0.001
+          },
+          "slippageBps": {
+            "type": "number",
+            "example": 3
+          },
+          "spreadBps": {
+            "type": "number",
+            "example": 2
+          },
+          "compare": {
+            "type": "boolean",
+            "default": false
+          },
+          "candles": {
+            "maxItems": 50000,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CandleDto"
+            }
+          }
+        },
+        "required": [
+          "strategy",
+          "initialCapital",
+          "maxPositions",
+          "usdtPerTrade",
+          "candles"
+        ]
+      },
+      "BacktestResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "report": {
+            "type": "object",
+            "description": "Reproducible simulation report with configuration, dataset hash, metrics and complete executions.",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "report"
+        ]
+      },
+      "RegisterValidationDto": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 30
+          }
+        },
+        "required": [
+          "reportId",
+          "rationale"
+        ]
+      },
+      "DecideValidationDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "APPROVED",
+              "REVOKED"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 30
+          },
+          "simulatorReviewed": {
+            "type": "boolean",
+            "example": false
+          },
+          "outOfSampleReviewed": {
+            "type": "boolean",
+            "example": false
+          },
+          "costsReviewed": {
+            "type": "boolean",
+            "example": false
+          },
+          "riskReviewed": {
+            "type": "boolean",
+            "example": false
+          }
+        },
+        "required": [
+          "status",
+          "rationale",
+          "simulatorReviewed",
+          "outOfSampleReviewed",
+          "costsReviewed",
+          "riskReviewed"
+        ]
+      },
+      "CreateUserDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "admin@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "use-a-unique-password",
+            "minLength": 12
+          },
+          "name": {
+            "type": "string",
+            "example": "Trader A"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "admin"
+            ],
+            "default": "user"
+          },
+          "initialCapital": {
+            "type": "number",
+            "example": 500,
+            "minimum": 10,
+            "maximum": 1000000
+          },
+          "maxPositions": {
+            "type": "number",
+            "example": 5
+          },
+          "usdtPerTrade": {
+            "type": "number",
+            "example": 30
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "name"
+        ]
+      },
+      "UsersPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Domain records scoped to the authenticated account. See docs/database.md for full fields.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicUserDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "NotificationSettingsDto": {
+        "type": "object",
+        "properties": {
+          "telegramChatId": {
+            "type": "string",
+            "example": "123456789",
+            "description": "Admin-verified private Telegram chat belonging to this user. No global fallback."
+          }
+        },
+        "required": [
+          "telegramChatId"
+        ]
+      },
+      "HealthDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "example": "PAPER"
+          },
+          "database": {
+            "type": "boolean"
+          },
+          "redis": {
+            "type": "boolean"
+          },
+          "marketFresh": {
+            "type": "boolean"
+          },
+          "outboxPending": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "status",
+          "mode",
+          "database",
+          "redis",
+          "marketFresh",
+          "outboxPending"
+        ]
+      }
+    }
+  }
+}

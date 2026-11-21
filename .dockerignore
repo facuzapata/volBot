@@ -6,6 +6,8 @@ coverage
 .gitignore
 README.md
 .env
+.env.*
+reports
 .DS_Store
 .wwebjs_auth
 .wwebjs_cache

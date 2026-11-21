@@ -1,5 +1,5 @@
 {
-  "name": "profit-bot",
+    "name": "profit-bot",
   "version": "0.0.1",
   "description": "",
   "author": "",
@@ -10,9 +10,22 @@
     "vercel-build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
+    "start:prod": "node dist/main.js",
+    "worker": "node dist/worker.js",
+    "worker:dev": "ts-node -r tsconfig-paths/register src/worker.ts",
+    "typecheck": "tsc --noEmit --incremental false",
+    "db:migrate": "node dist/v2/cli.js migrate",
+    "seed": "node dist/v2/cli.js seed",
+    "backtest": "node dist/v2/cli.js backtest",
+    "market:download": "node dist/v2/cli.js download",
+    "docs:openapi": "ts-node src/v2/openapi.ts",
     "format": "prettier --write \"src/**/*.ts\"",
-    "lint": "eslint \"src/**/*.ts\" --fix",
-    "test": "jest --coverage",
+    "lint": "eslint --config eslint.v2.mjs src/v2 src/main.ts src/worker.ts src/app.module.ts test/v2",
+    "lint:legacy": "eslint \"src/**/*.ts\"",
+    "test": "jest --runInBand --silent",
+    "test:v2": "jest --runInBand --silent test/v2",
+    "test:integration": "node scripts/test-integration.cjs",
+    "test:coverage": "jest --runInBand --coverage --silent",
     "prepare": "husky install"
   },
   "dependencies": {
@@ -28,7 +41,11 @@
     "@types/redis": "^4.0.10",
     "bcrypt": "^6.0.0",
     "binance-api-node": "^0.12.9",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "decimal.js": "^10.6.0",
     "fast-xml-parser": "^5.6.0",
+    "kafkajs": "^2.2.4",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.16.0",
@@ -38,7 +55,8 @@
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.1",
     "typeorm": "^0.3.24",
-    "whatsapp-web.js": "^1.31.0"
+    "whatsapp-web.js": "^1.31.0",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
