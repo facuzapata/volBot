@@ -9,6 +9,9 @@ export function numberEnv(name: string, fallback: number, min: number, max: numb
     throw new Error(`Invalid configuration: ${name}`);
   return value;
 }
+export function refreshTokenTtlDays(): number {
+  return numberEnv('V2_REFRESH_TOKEN_TTL_DAYS', 7, 1, 30);
+}
 export function databaseUrl(): string {
   const url = process.env.V2_DATABASE_URL;
   if (!url) throw new Error('V2_DATABASE_URL is required; use a dedicated database');

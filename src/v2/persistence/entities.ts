@@ -34,6 +34,19 @@ export class V2User {
   @Column({ type: 'varchar', nullable: true }) whatsappNumber!: string | null;
   @CreateDateColumn() createdAt!: Date;
 }
+@Entity('v2_refresh_tokens')
+@Index(['userId', 'expiresAt'])
+export class RefreshTokenRow {
+  @PrimaryColumn('uuid') id!: string;
+  @Column('uuid') userId!: string;
+  // Opaque refresh tokens are never stored; only a SHA-256 digest is persisted.
+  @Column() tokenHash!: string;
+  @Column() tokenVersion!: number;
+  @Column({ type: 'timestamptz' }) expiresAt!: Date;
+  @Column({ type: 'timestamptz', nullable: true }) revokedAt!: Date | null;
+  @Column('uuid', { nullable: true }) replacedById!: string | null;
+  @CreateDateColumn() createdAt!: Date;
+}
 @Entity('v2_virtual_accounts')
 export class VirtualAccountRow {
   @PrimaryColumn('uuid') id!: string;
@@ -123,6 +136,7 @@ export class StrategyValidationRow {
 }
 export const V2_ENTITIES = [
   V2User,
+  RefreshTokenRow,
   VirtualAccountRow,
   PositionRow,
   OrderIntentRow,

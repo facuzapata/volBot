@@ -11,8 +11,11 @@ import {
   Post,
   Query,
   Req,
+  Res,
   ServiceUnavailableException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -30,6 +33,7 @@ import {
 import { DeliveryAttemptRow, V2User, StrategyValidationRow } from '../persistence/entities';
 import { ApiService, publicUser } from './api.service';
 import { Admin, AuthRequest, Public } from './auth';
+import { refreshTokenTtlDays } from '../config';
 import {
   AccountConfigResponseDto,
   BacktestDto,
@@ -79,12 +83,64 @@ function Contract(summary: string, response: new () => object, created = false) 
 @Controller('auth')
 export class AuthControllerV2 {
   constructor(private readonly api: ApiService) {}
+  private cookieOptions() {
+    return {
+      httpOnly: true,
+      secure: process.env.V2_COOKIE_SECURE !== 'false',
+      sameSite: 'lax' as const,
+      path: '/api/auth',
+      maxAge: refreshTokenTtlDays() * 86400000,
+    };
+  }
+  private refreshToken(req: AuthRequest): string | undefined {
+    const prefix = 'volbot_refresh=';
+    const cookie = (req.headers.cookie || '')
+      .split(';')
+      .map((value) => value.trim())
+      .find((value) => value.startsWith(prefix));
+    if (!cookie) return undefined;
+    try {
+      return decodeURIComponent(cookie.slice(prefix.length));
+    } catch {
+      return undefined;
+    }
+  }
+  private respond(res: Response, session: { accessToken: string; refreshToken: string; user: object }) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.cookie('volbot_refresh', session.refreshToken, this.cookieOptions());
+    return { accessToken: session.accessToken, user: session.user };
+  }
   @Public()
   @Post('login')
   @HttpCode(200)
   @Contract('Iniciar sesión', TokenDto)
-  login(@Body() body: LoginDto, @Req() req: AuthRequest) {
-    return this.api.login(body.email, body.password, req.ip || 'unknown');
+  async login(@Body() body: LoginDto, @Req() req: AuthRequest, @Res({ passthrough: true }) res: Response) {
+    return this.respond(res, await this.api.login(body.email, body.password, req.ip || 'unknown'));
+  }
+  @Public()
+  @Post('refresh')
+  @HttpCode(200)
+  @Contract('Refresh session with HttpOnly cookie', TokenDto)
+  async refresh(@Req() req: AuthRequest, @Res({ passthrough: true }) res: Response) {
+    const raw = this.refreshToken(req);
+    if (!raw) throw new UnauthorizedException();
+    return this.respond(res, await this.api.refresh(raw));
+  }
+  @Public()
+  @Post('logout')
+  @HttpCode(200)
+  @Contract('Log out and revoke refresh token', RecordDto)
+  async logout(@Req() req: AuthRequest, @Res({ passthrough: true }) res: Response) {
+    await this.api.logout(this.refreshToken(req));
+    res.setHeader('Cache-Control', 'no-store');
+    const options = this.cookieOptions();
+    res.clearCookie('volbot_refresh', {
+      httpOnly: options.httpOnly,
+      secure: options.secure,
+      sameSite: options.sameSite,
+      path: options.path,
+    });
+    return { id: 'session', status: 'LOGGED_OUT' };
   }
 }
 @ApiTags('Paper account')
