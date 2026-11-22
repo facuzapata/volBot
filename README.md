@@ -1,4 +1,4 @@
-# volBot V2 — BTCUSDT, exclusivamente PAPER
+# volBot V2 — BTCUSDT con PAPER predeterminado
 
 ## BTC-V3 experimental y simulador causal
 
@@ -10,7 +10,7 @@ Para un servidor Node configurado explícitamente, `V3_PARAMETERS_JSON` permite 
 
 Las pruebas nuevas están en `test/v2/btc-v3-*.ts`. El backtest HTTP admite `btc-v3`, sus parámetros validados y riesgo máximo; no acepta calibración ni aprobación proporcionadas por clientes. Un reporte de cero operaciones puede registrarse pendiente y no concede aprobación. El journal de la prueba final impide repetirla automáticamente: no borrarlo ni reutilizar marzo para ajustar parámetros conservando la etiqueta fuera de muestra.
 
-Backend NestJS para investigar estrategias sobre datos públicos de Binance, operar con saldos virtuales, persistir resultados y comparar backtests. No promete rentabilidad. Ninguna configuración habilita trading real.
+Backend NestJS para investigar estrategias sobre datos públicos de Binance, operar con saldos virtuales, persistir resultados y comparar backtests. No promete rentabilidad. Cada usuario puede guardar una conexión Binance cifrada y verificada; PAPER sigue siendo el modo predeterminado y las claves productivas requieren una habilitación explícita del servidor.
 
 ## Inicio rápido
 
@@ -20,7 +20,8 @@ Requisitos: Node.js22, npm, Docker Engine/Desktop con Compose y acceso a los hos
 npm.cmd ci --ignore-scripts
 Copy-Item .env.v2.example .env.v2
 # Completar V2_POSTGRES_PASSWORD, V2_DATABASE_URL, V2_JWT_SECRET y V2_ADMIN_PASSWORD.
-# Usar secretos aleatorios únicos; NO agregar API Keys Binance.
+# Generar V2_CREDENTIAL_ENCRYPTION_KEY: $key = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($key); [Convert]::ToBase64String($key)
+# Las API keys se cargan por usuario mediante /api/me/exchange-connection; nunca en el archivo .env.
 docker compose --env-file .env.v2 -f docker-compose.v2.yml up -d --build
 docker compose --env-file .env.v2 -f docker-compose.v2.yml run --rm --no-deps api node dist/v2/cli.js seed
 ```
@@ -30,7 +31,7 @@ Swagger: http://localhost:3100/api/docs
 
 OpenAPI: http://localhost:3100/api/docs-json ; copia reproducible en [docs/openapi.json](docs/openapi.json).
 
-La cuenta inicial usa `V2_INITIAL_CAPITAL=500`, máximo5 y30 USDT por operación, y nace **pausada**. Iniciar sesión en `POST /api/auth/login` con los valores locales de administrador y usar Authorize en Swagger. Habilitar entradas requiere primero aprobación administrativa explícita de la versión/configuración/evidencia; sin ella la siguiente solicitud devuelve 409. La auditoría actual no justifica concederla. Consultar [auditoría del simulador](docs/simulator-audit.md) y [diagnóstico de estrategia](docs/strategy-diagnostics.md).
+La cuenta inicial usa `V2_INITIAL_CAPITAL=500`, máximo5 y30 USDT por operación, y nace **pausada**. Iniciar sesión en `POST /api/auth/login` con los valores locales de administrador y usar Authorize en Swagger. La estrategia marcada como activa es la que genera las señales operativas; habilitar entradas sólo controla si cada cuenta acepta nuevas oportunidades. La selección posterior de una estrategia o del modo PAPER/LIVE no modifica posiciones ya abiertas.
 
 ```http
 PATCH /api/me/entries

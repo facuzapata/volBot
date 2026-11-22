@@ -47,6 +47,16 @@ export class RefreshTokenRow {
   @Column('uuid', { nullable: true }) replacedById!: string | null;
   @CreateDateColumn() createdAt!: Date;
 }
+@Entity('v2_exchange_credentials')
+export class ExchangeCredentialRow {
+  @PrimaryColumn('uuid') id!: string;
+  @Index({ unique: true }) @Column('uuid') userId!: string;
+  @Column() environment!: 'TESTNET' | 'LIVE';
+  @Column('text') apiKeyCiphertext!: string;
+  @Column('text') secretCiphertext!: string;
+  @Column({ type: 'timestamptz', nullable: true }) verifiedAt!: Date | null;
+  @CreateDateColumn() createdAt!: Date;
+}
 @Entity('v2_virtual_accounts')
 export class VirtualAccountRow {
   @PrimaryColumn('uuid') id!: string;
@@ -87,7 +97,7 @@ export class CandleRow {
 export class StrategyVersionRow {
   @PrimaryColumn() id!: string;
   @Column() revision!: string;
-  @Column('jsonb') state!: { eligible: boolean; lastCandleTime: number; lastSignalTime: number; configuration?: SimulationConfig; configurationHash?: string; lastDecision?:{decision:string;reason:string;features?:object} };
+  @Column('jsonb') state!: { active?: boolean; eligible: boolean; lastCandleTime: number; lastSignalTime: number; configuration?: SimulationConfig; configurationHash?: string; lastDecision?:{decision:string;reason:string;features?:object} };
 }
 @Entity('v2_outbox')
 @Index(['publishedAt', 'createdAt'])
@@ -137,6 +147,7 @@ export class StrategyValidationRow {
 export const V2_ENTITIES = [
   V2User,
   RefreshTokenRow,
+  ExchangeCredentialRow,
   VirtualAccountRow,
   PositionRow,
   OrderIntentRow,

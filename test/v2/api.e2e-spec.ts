@@ -15,6 +15,7 @@ import { RedisCacheService } from '../../src/v2/market/redis-cache.service';
 import { BacktestingEngine } from '../../src/v2/backtesting/backtesting.engine';
 import { StrategyApprovalService } from '../../src/v2/strategy/approval.service';
 import { SimulationSettings } from '../../src/v2/market/simulation-settings';
+import { BinanceCredentialsService } from '../../src/v2/execution/binance-credentials.service';
 
 describe('V2 HTTP contract with isolated persistence double', () => {
   let app: INestApplication;
@@ -50,6 +51,7 @@ describe('V2 HTTP contract with isolated persistence double', () => {
         ApiService,
         SimulationSettings,
         { provide: StrategyApprovalService, useValue: { activeApproved: async () => false } },
+        { provide: BinanceCredentialsService, useValue: { status: async () => ({ configured: false }) } },
         PaperExecutionAdapter,
         { provide: BacktestingEngine, useValue: new BacktestingEngine() },
         { provide: DataSource, useValue: db },
@@ -86,9 +88,9 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(403);
   });
-  it('rejects enabling PAPER entries without an explicit strategy approval', async () => {
-    await request(app.getHttpServer()).patch('/api/me/entries').set('Authorization', `Bearer ${token}`).send({ enabled:true }).expect(409);
-    expect(state.account.entriesEnabled).toBe(false);
+  it('enables entries without a separate strategy-approval workflow', async () => {
+    await request(app.getHttpServer()).patch('/api/me/entries').set('Authorization', `Bearer ${token}`).send({ enabled:true }).expect(200);
+    expect(state.account.entriesEnabled).toBe(true);
   });
   it('rejects mass assignment and strategy overrides at the HTTP boundary', async () => {
     await request(app.getHttpServer())
@@ -109,7 +111,7 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ maxPositions: 3, usdtPerTrade: 20 })
       .expect(200);
-    expect(response.body).toEqual({ maxPositions: 3, usdtPerTrade: '20', entriesEnabled: false });
+    expect(response.body).toEqual({ maxPositions: 3, usdtPerTrade: '20', entriesEnabled: true, executionMode: 'PAPER' });
   });
   it('does not return secrets and hides another account position', async () => {
     const response = await request(app.getHttpServer())
@@ -137,11 +139,12 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .expect(401);
     user.active = true;
   });
-  it('publishes Swagger JSON and has no live trading route', async () => {
+  it('publishes Swagger JSON without exposing an order-submission route', async () => {
     const response = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
     expect(response.body.paths).toHaveProperty('/api/me/config');
     expect(response.body.paths).toHaveProperty('/api/backtests');
-    expect(JSON.stringify(response.body.paths)).not.toMatch(/binance|\/live\/orders/);
+    expect(response.body.paths).toHaveProperty('/api/me/exchange-connection');
+    expect(JSON.stringify(response.body.paths)).not.toMatch(/\/live\/orders/);
   });
   it('documents BTC-V3 without allowing clients to upload calibration or approval bypasses',async()=>{
     const response=await request(app.getHttpServer()).get('/api/docs-json').expect(200);

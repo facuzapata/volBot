@@ -12,6 +12,10 @@ export function numberEnv(name: string, fallback: number, min: number, max: numb
 export function refreshTokenTtlDays(): number {
   return numberEnv('V2_REFRESH_TOKEN_TTL_DAYS', 7, 1, 30);
 }
+/** Production exchange orders require an explicit deployment-level circuit breaker. */
+export function liveTradingEnabled(): boolean {
+  return process.env.V2_LIVE_TRADING_ENABLED === 'true';
+}
 export function databaseUrl(): string {
   const url = process.env.V2_DATABASE_URL;
   if (!url) throw new Error('V2_DATABASE_URL is required; use a dedicated database');

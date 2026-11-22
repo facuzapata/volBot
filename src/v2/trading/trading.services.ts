@@ -16,7 +16,7 @@ import {
   VirtualAccountRow,
 } from '../persistence/entities';
 import { StoreService } from '../persistence/store.service';
-import { MarketHistory, StrategyEngine, STRATEGY_REVISION } from '../strategy/strategy-engine';
+import { MarketHistory, StrategyEngine } from '../strategy/strategy-engine';
 import { SimulationSettings } from '../market/simulation-settings';
 import { RedisCacheService } from '../market/redis-cache.service';
 import { RiskPolicy } from '../risk/risk-policy';
@@ -36,17 +36,14 @@ export class RiskManagerService {
   constructor(
     private readonly store: StoreService,
     private readonly policy: RiskPolicy,
-    private readonly approvals: StrategyApprovalService,
+    // Retained as an optional dependency while older worker test composition is migrated.
+    private readonly _approvals?: StrategyApprovalService,
   ) {}
   async reserve(accountId: string, signal: MarketSignal, eventId: string): Promise<void> {
     await this.store.accountTransaction(accountId, async (s, tx) => {
       await this.store.once(tx, `dispatcher:${accountId}`, eventId, async () => {
         const owner = await tx.findOneByOrFail(V2User, { id: s.account.userId });
         if (!owner.active) s.account.entriesEnabled = false;
-        if (!await this.approvals.approved(tx, signal)) {
-          if (!s.decisions.some(d => d.id === `${accountId}:${signal.id}`)) s.decisions.push({ id: `${accountId}:${signal.id}`, accountId, signalId: signal.id, accepted: false, action:'NO_TRADE', reason: 'STRATEGY_NOT_APPROVED', at: Date.now() });
-          return;
-        }
         const decision = this.policy.reserve(s, signal, Date.now());
         if (!decision.accepted) return;
         const order = s.orders.find((o) => o.signalId === signal.id && o.side === 'BUY')!;
@@ -94,7 +91,7 @@ export class ExecutionEngineService {
   constructor(
     private readonly store: StoreService,
     @Inject(EXECUTION_ADAPTER) private readonly paper: ExecutionAdapter,
-    private readonly approvals: StrategyApprovalService,
+    private readonly _approvals?: StrategyApprovalService,
   ) {}
   async command(event: DomainEvent<'execution.command.v1'>): Promise<void> {
     const { accountId, orderId, price, signalTime } = event.payload;
@@ -108,7 +105,6 @@ export class ExecutionEngineService {
           const owner=await tx.findOneByOrFail(V2User,{id:s.account.userId});
           if(!owner.active||!s.account.entriesEnabled){o.deferredReason=owner.active?'ENTRIES_PAUSED':'OWNER_INACTIVE';return;}
         }
-        if (o.side === 'BUY' && !await this.approvals.approved(tx, { strategy: p.strategy, strategyRevision: p.strategyRevision ?? revisionFor(p.strategy), config: p.config })) return;
         if (Date.now() - signalTime > p.config.signalMaxAgeMs)
           this.paper.cancel(s, orderId, Date.now());
         else {
@@ -144,7 +140,7 @@ export class PositionManagerService {
     private readonly store: StoreService,
     private readonly paper: PaperExecutionAdapter,
     private readonly engine: StrategyEngine,
-    private readonly approvals: StrategyApprovalService,
+    private readonly _approvals?: StrategyApprovalService,
   ) {}
   async candle(
     event: DomainEvent<'market.candle.closed.v1'>,
@@ -156,13 +152,9 @@ export class PositionManagerService {
       await this.store.accountTransaction(account.id, async (s, tx) => {
         await this.store.once(tx, `positions:${account.id}`, event.eventId, async () => {
         const owner=await tx.findOneByOrFail(V2User,{id:s.account.userId});
-        const permitted = new Set<string>();
-        for (const p of s.positions.filter(p => p.status !== 'CLOSED' && p.status !== 'REJECTED').sort((a,b) => configurationHash(a.strategy,a.strategyRevision??STRATEGY_REVISION,a.config).localeCompare(configurationHash(b.strategy,b.strategyRevision??STRATEGY_REVISION,b.config)))) {
-          if (await this.approvals.approved(tx, { strategy: p.strategy, strategyRevision: p.strategyRevision ?? revisionFor(p.strategy), config: p.config })) permitted.add(p.id);
-        }
         const rate=Math.min(simulationConfig().participationRate,...s.positions.map(p=>p.config.participationRate));
         const budget=await this.store.causalBudget(tx,event.payload.candle.openTime,rate);
-        this.paper.onCandle(s, event.payload.candle, this.engine.invalidated(history), id => permitted.has(id)&&s.account.entriesEnabled&&owner.active,budget);
+        this.paper.onCandle(s, event.payload.candle, this.engine.invalidated(history), () => s.account.entriesEnabled&&owner.active,budget);
           for (const p of s.positions.filter(
             (p) => Number(p.quantity) > 0 && Number(p.stopLoss) <= 0,
           ))
@@ -209,13 +201,19 @@ export class StrategyServiceV2 {
     if (alignedHistory(history, at)) await this.cache.set(`history:${at}`, history);
     return history;
   }
+  private async activeStrategy(): Promise<ReturnType<typeof selectedStrategy>> {
+    const rows = await this.store.db.getRepository(StrategyVersionRow).find();
+    const active = rows.find((row) => row.state.active)?.id;
+    if (active === 'legacy-v1' || active === 'btc-v2' || active === 'btc-v3') return active;
+    return selectedStrategy();
+  }
   async candle(event: DomainEvent<'market.candle.closed.v1'>): Promise<void> {
     const candle: Candle = event.payload.candle;
     if (candle.timeframe !== '1m') return;
     const history = await this.history(candle.closeTime);
     // Position supervision always runs, regardless of entry enablement or signal availability.
     await this.positions.candle(event, history);
-    const strategy = selectedStrategy();
+    const strategy = await this.activeStrategy();
     if ((strategy === 'btc-v2'||strategy==='btc-v3') && !alignedHistory(history, candle.closeTime)) {
       if (event.payload.recovered) return;
       throw new Error('WAITING_FOR_ALIGNED_CLOSED_TIMEFRAMES');

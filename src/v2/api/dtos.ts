@@ -91,6 +91,23 @@ export class EntriesDto {
   @IsBoolean()
   enabled!: boolean;
 }
+export class BinanceCredentialsDto {
+  @ApiProperty({ description: 'Binance API key. It is encrypted at rest and never returned.' })
+  @IsString() @MinLength(16) @MaxLength(200) apiKey!: string;
+  @ApiProperty({ description: 'Binance API secret. It is encrypted at rest and never returned.' })
+  @IsString() @MinLength(16) @MaxLength(300) secret!: string;
+  @ApiProperty({ enum: ['TESTNET', 'LIVE'], description: 'Use TESTNET before a production key.' })
+  @IsIn(['TESTNET', 'LIVE']) environment!: 'TESTNET' | 'LIVE';
+}
+export class TradingModeDto {
+  @ApiProperty({ enum: ['PAPER', 'LIVE'], description: 'LIVE submits to the verified Binance connection for this user.' })
+  @IsIn(['PAPER', 'LIVE']) mode!: 'PAPER' | 'LIVE';
+}
+export class ExchangeConnectionDto {
+  @ApiProperty({ example: true }) configured!: boolean;
+  @ApiPropertyOptional({ enum: ['TESTNET', 'LIVE'] }) environment?: 'TESTNET' | 'LIVE';
+  @ApiPropertyOptional({ example: '2026-11-22T00:00:00.000Z' }) verifiedAt?: Date | null;
+}
 export class RegisterValidationDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() reportId!: string;
   @ApiProperty({ minLength: 30 }) @IsString() @MinLength(30) @MaxLength(4000) rationale!: string;
@@ -140,7 +157,7 @@ export class TokenDto {
   @ApiProperty({ type: PublicUserDto }) user!: PublicUserDto;
 }
 export class BalanceDto {
-  @ApiProperty({ example: 'PAPER', enum: ['PAPER'] }) mode!: string;
+  @ApiProperty({ example: 'PAPER', enum: ['PAPER', 'LIVE'] }) mode!: string;
   @ApiProperty({ example: '500.000000000000' }) availableUSDT!: string;
   @ApiProperty({ example: '30.000000000000' }) reservedUSDT!: string;
   @ApiProperty({ example: '0.000300000000' }) assignedBTC!: string;
@@ -156,6 +173,7 @@ export class AccountConfigResponseDto {
   @ApiProperty({ example: 5 }) maxPositions!: number;
   @ApiProperty({ example: '30.000000000000' }) usdtPerTrade!: string;
   @ApiProperty({ example: false }) entriesEnabled!: boolean;
+  @ApiProperty({ enum: ['PAPER', 'LIVE'], example: 'PAPER' }) executionMode!: string;
 }
 export class RecordDto {
   @ApiProperty({ description: 'Stable, idempotent domain identifier' }) id!: string;
@@ -258,7 +276,6 @@ export class StrategyResponseDto {
   @ApiProperty() active!: boolean;
   @ApiProperty({ description: 'Last evaluated closed-candle timestamp in UTC milliseconds' }) lastEvaluationAt!: number;
   @ApiProperty() eligible!: boolean;
-  @ApiProperty({enum:['APPROVED','PENDING','REVOKED','UNREGISTERED']}) approvalStatus!:string;
   @ApiProperty({type:'object',additionalProperties:true}) configuration!:object;
   @ApiProperty() configurationHash!:string;
   @ApiProperty() calibrationReady!:boolean;
@@ -287,6 +304,7 @@ export class PositionDto extends RecordDto {
   @ApiProperty() accountId!: string;
   @ApiProperty() signalId!: string;
   @ApiProperty({ enum: ['legacy-v1', 'btc-v2','btc-v3','trend-reference'] }) strategy!: string;
+  @ApiProperty({ enum: ['PAPER', 'LIVE'] }) executionMode!: string;
   @ApiProperty({ description: 'Current remaining BTC, decimal string', example: '0.000300000000' })
   quantity!: string;
   @ApiProperty() averageEntry!: string;
@@ -309,6 +327,7 @@ export class OrderDto extends RecordDto {
   @ApiProperty() positionId!: string;
   @ApiProperty() signalId!: string;
   @ApiProperty({ enum: ['BUY', 'SELL'] }) side!: string;
+  @ApiProperty({ enum: ['PAPER', 'LIVE'] }) executionMode!: string;
   @ApiProperty({ enum: ['MARKET', 'LIMIT', 'PROTECTION'] }) type!: string;
   @ApiProperty() quantity!: string;
   @ApiProperty() filledQuantity!: string;
