@@ -22,10 +22,14 @@ import { RedisCacheService } from '../market/redis-cache.service';
 import { RiskPolicy } from '../risk/risk-policy';
 import { INTERVAL_MS } from '../market/public-market.client';
 import { StrategyApprovalService, configurationHash } from '../strategy/approval.service';
-import { revisionFor } from '../strategy/versions';
+import { revisionFor, strategyConfiguration } from '../strategy/versions';
 
-export function alignedHistory(history: MarketHistory, at: number): boolean {
-  return (['1m', '5m', '1h'] as const).every(timeframe => {
+export function alignedHistory(
+  history: MarketHistory,
+  at: number,
+  timeframes: ReadonlyArray<keyof MarketHistory> = ['1m', '5m', '1h'],
+): boolean {
+  return timeframes.every(timeframe => {
     const expected = Math.floor((at + 1) / INTERVAL_MS[timeframe]) * INTERVAL_MS[timeframe] - 1;
     return history[timeframe].slice(-1)[0]?.closeTime === expected;
   });
@@ -155,6 +159,17 @@ export class PositionManagerService {
         const rate=Math.min(simulationConfig().participationRate,...s.positions.map(p=>p.config.participationRate));
         const budget=await this.store.causalBudget(tx,event.payload.candle.openTime,rate);
         this.paper.onCandle(s, event.payload.candle, this.engine.invalidated(history), () => s.account.entriesEnabled&&owner.active,budget);
+        const v4Closed = s.positions
+          .filter((p) => p.strategy === 'btc-v4' && p.status === 'CLOSED' && (p.closedAt ?? 0) > (s.account.v4StopHaltAt ?? 0))
+          .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0));
+        const v4StopStreak = v4Closed.findIndex((p) => p.exitReason !== 'STOP_LOSS');
+        const consecutiveStops = v4StopStreak === -1 ? v4Closed.length : v4StopStreak;
+        const v4MaxStops = v4Closed[0]?.config.btcV4?.maxConsecutiveStopLosses ?? 3;
+        if (consecutiveStops >= v4MaxStops) {
+          s.account.entriesEnabled = false;
+          // A later manual resume starts a new observed stop sequence.
+          s.account.v4StopHaltAt = event.payload.candle.closeTime;
+        }
           for (const p of s.positions.filter(
             (p) => Number(p.quantity) > 0 && Number(p.stopLoss) <= 0,
           ))
@@ -193,7 +208,7 @@ export class StrategyServiceV2 {
         .where('c.timeframe = :timeframe', { timeframe })
         .andWhere("(c.data->>'closeTime')::bigint <= :at", { at })
         .orderBy('c.openTime', 'DESC')
-        .take(100)
+        .take(timeframe === '1h' ? 500 : 100)
         .getMany();
       history[timeframe] = rows.reverse().map((x) => x.data);
     }
@@ -204,8 +219,14 @@ export class StrategyServiceV2 {
   private async activeStrategy(): Promise<ReturnType<typeof selectedStrategy>> {
     const rows = await this.store.db.getRepository(StrategyVersionRow).find();
     const active = rows.find((row) => row.state.active)?.id;
-    if (active === 'legacy-v1' || active === 'btc-v2' || active === 'btc-v3') return active;
+    if (active === 'legacy-v1' || active === 'btc-v2' || active === 'btc-v3' || active === 'btc-v4') return active;
     return selectedStrategy();
+  }
+  private configurationFor(strategy: ReturnType<typeof selectedStrategy>) {
+    const config = strategyConfiguration(strategy, this.settings.config);
+    if (strategy === 'btc-v3' && this.settings.btcV3Calibration)
+      config.btcV3Calibration = this.settings.btcV3Calibration;
+    return config;
   }
   async candle(event: DomainEvent<'market.candle.closed.v1'>): Promise<void> {
     const candle: Candle = event.payload.candle;
@@ -214,11 +235,13 @@ export class StrategyServiceV2 {
     // Position supervision always runs, regardless of entry enablement or signal availability.
     await this.positions.candle(event, history);
     const strategy = await this.activeStrategy();
-    if ((strategy === 'btc-v2'||strategy==='btc-v3') && !alignedHistory(history, candle.closeTime)) {
+    const requiredTimeframes = strategy === 'btc-v4' ? ['1m', '1h'] as const : ['1m', '5m', '1h'] as const;
+    if ((strategy === 'btc-v2'||strategy==='btc-v3'||strategy==='btc-v4') && !alignedHistory(history, candle.closeTime, requiredTimeframes)) {
       if (event.payload.recovered) return;
       throw new Error('WAITING_FOR_ALIGNED_CLOSED_TIMEFRAMES');
     }
-    const signal = this.engine.evaluate(history, strategy, this.settings.config);
+    const configuration = this.configurationFor(strategy);
+    const signal = this.engine.evaluate(history, strategy, configuration);
     await this.store.db.transaction(async (tx) => {
       const row = await tx.findOneOrFail(StrategyVersionRow, {
         where: { id: strategy },
@@ -229,8 +252,8 @@ export class StrategyServiceV2 {
         const risingEdge = !!signal && !row.state.eligible;
         const assessment = this.engine.lastAssessment;
         row.state = { ...row.state, eligible: !!signal, lastCandleTime: candle.closeTime,
-          lastDecision:this.engine.lastV3Assessment?{decision:this.engine.lastV3Assessment.decision,reason:this.engine.lastV3Assessment.reason,features:this.engine.lastV3Assessment.features}:assessment?{decision:assessment.eligible?'BUY':'NO_TRADE',reason:assessment.reason,features:{regime:assessment.regime,conditions:assessment.conditions}}:undefined,
-          configuration: this.settings.config, configurationHash: configurationHash(strategy, revisionFor(strategy), this.settings.config) };
+          lastDecision:this.engine.lastV3Assessment?{decision:this.engine.lastV3Assessment.decision,reason:this.engine.lastV3Assessment.reason,features:this.engine.lastV3Assessment.features}:assessment?{decision:assessment.eligible?'BUY':'NO_TRADE',reason:assessment.reason,features:{regime:assessment.regime,conditions:assessment.conditions,...(assessment.features??{})}}:undefined,
+          configuration, configurationHash: configurationHash(strategy, revisionFor(strategy), configuration) };
         if (
           risingEdge &&
           !event.payload.recovered &&

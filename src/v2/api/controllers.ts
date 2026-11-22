@@ -293,9 +293,9 @@ export class BacktestingController {
 export class AdminControllerV2 {
   constructor(private readonly api: ApiService) {}
   @Patch('strategies/:id/active')
-  @ApiParam({ name: 'id', enum: ['legacy-v1', 'btc-v2', 'btc-v3'] })
+  @ApiParam({ name: 'id', enum: ['legacy-v1', 'btc-v2', 'btc-v3', 'btc-v4'] })
   @Contract('Seleccionar la estrategia operativa para señales nuevas; no modifica posiciones existentes', StrategyResponseDto)
-  activateStrategy(@Param('id') id: 'legacy-v1' | 'btc-v2' | 'btc-v3') {
+  activateStrategy(@Param('id') id: 'legacy-v1' | 'btc-v2' | 'btc-v3' | 'btc-v4') {
     return this.api.activateStrategy(id);
   }
   @Post('strategy-validations') @Contract('Registrar evaluación pendiente; nunca habilita por métricas automáticamente', RecordDto, true)

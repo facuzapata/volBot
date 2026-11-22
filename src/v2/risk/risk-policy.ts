@@ -25,7 +25,7 @@ export class RiskPolicy {
       s.decisions.push({id:decisionId,accountId:s.account.id,signalId:signal.id,accepted:false,reason,at});
       return {accepted:false,reason};
     }
-    const budget = d(s.account.usdtPerTrade);
+    const configuredBudget = d(s.account.usdtPerTrade);
     const open = s.positions.filter(isPositionOpen);
     const equity = d(s.account.available)
       .plus(s.account.reserved)
@@ -47,24 +47,46 @@ export class RiskPolicy {
               (signal.atr * c.atrMultiplier) / signal.referencePrice,
               (signal.referencePrice - signal.swingLow) / signal.referencePrice,
             );
+    // V4 uses the configured ticket as a ceiling, never as permission to exceed the
+    // account-level loss cap implied by its structural stop.
+    const riskCostFraction = riskDistance + 2 * c.feeRate + (c.spreadBps + 2 * c.slippageBps) / 10000;
+    const budget = signal.strategy === 'btc-v4' && riskCostFraction > 0
+      ? Decimal.min(configuredBudget, equity.mul(c.maxRiskPerTrade).div(riskCostFraction))
+      : configuredBudget;
     const exposure = open.reduce(
       (a, p) => a.plus(d(p.quantity).mul(signal.referencePrice)),
       d(s.account.reserved),
     );
+    const consecutiveV4Stops = s.positions
+      .filter((p) => p.strategy === 'btc-v4' && p.status === 'CLOSED' && (p.closedAt ?? 0) > (s.account.v4StopHaltAt ?? 0))
+      .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0))
+      .findIndex((p) => p.exitReason !== 'STOP_LOSS');
+    const v4StopStreak = consecutiveV4Stops === -1
+      ? s.positions.filter((p) => p.strategy === 'btc-v4' && p.status === 'CLOSED').length
+      : consecutiveV4Stops;
+    const v4Halted = signal.strategy === 'btc-v4' && v4StopStreak >= (c.btcV4?.maxConsecutiveStopLosses ?? 3);
     let reason = 'ACCEPTED';
-    if (!s.account.entriesEnabled) reason = 'ENTRIES_PAUSED';
+    if (v4Halted) {
+      s.account.entriesEnabled = false;
+      // Resuming entries is an explicit acknowledgement: only future stop exits
+      // will count toward another automatic halt.
+      s.account.v4StopHaltAt = at;
+      reason = 'CONSECUTIVE_STOP_LOSS_HALT';
+    }
+    else if (!s.account.entriesEnabled) reason = 'ENTRIES_PAUSED';
     else if (at - signal.candleTime > c.signalMaxAgeMs || at < signal.candleTime)
       reason = 'STALE_SIGNAL';
     else if (open.some((p) => (!Number.isFinite(Number(p.stopLoss)) || d(p.stopLoss).lte(0)) && d(p.quantity).gt(0)))
       reason = 'UNPROTECTED_POSITION';
     else if (open.length >= s.account.maxPositions) reason = 'MAX_POSITIONS';
+    else if (signal.strategy === 'btc-v4' && open.some((p) => p.strategy === 'btc-v4')) reason = 'MAX_V4_POSITION';
     else if (budget.lte(0) || budget.gt(s.account.available)) reason = 'INSUFFICIENT_BALANCE';
     else if (exposure.plus(budget).gt(equity.mul(c.maxExposure))) reason = 'MAX_EXPOSURE';
     else if (!Number.isFinite(riskDistance)||riskDistance <= 0 || riskDistance > c.maxStopPercent) reason = 'STOP_DISTANCE';
     else if(open.some(p=>Number(p.quantity)>0&&signal.referencePrice<Number(p.averageEntry)))reason='AVERAGING_DOWN_BLOCKED';
     else if (
       budget
-        .mul(riskDistance + 2 * c.feeRate + (c.spreadBps + 2 * c.slippageBps) / 10000)
+        .mul(riskCostFraction)
         .gt(equity.mul(c.maxRiskPerTrade))
     )
       reason = 'TRADE_RISK';
@@ -125,10 +147,12 @@ export class RiskPolicy {
       targetDistance:signal.protection?(signal.protection.targetPrice/signal.referencePrice-1):signal.strategy === 'legacy-v1' ? 0.005 : c.takeProfit,
     };
     // Snapshot the risk distance: subsequent parameter changes never rewrite an open position.
-    p.stopLoss = str(signal.referencePrice * (1 - riskDistance));
-    p.takeProfit = str(
-      signal.referencePrice * (1 + (signal.strategy === 'legacy-v1' ? 0.005 : c.takeProfit)),
-    );
+    p.stopLoss = signal.protection
+      ? str(signal.protection.stopPrice)
+      : str(signal.referencePrice * (1 - riskDistance));
+    p.takeProfit = signal.protection
+      ? str(signal.protection.targetPrice)
+      : str(signal.referencePrice * (1 + (signal.strategy === 'legacy-v1' ? 0.005 : c.takeProfit)));
     const o: ExchangeOrder = {
       id: `${id}:entry`,
       accountId: s.account.id,
