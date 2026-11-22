@@ -3,7 +3,14 @@ import * as indicators from '../../utils/indicators';
 import { floorStep } from '../execution/pricing';
 import { Candle, MarketSignal, SimulationConfig } from '../domain/model';
 import type { MarketHistory } from './strategy-engine';
-import { BtcV5Parameters, BTC_V5_REVISION, DEFAULT_BTC_V5 } from './btc-v5.config';
+import {
+  BtcV5Parameters,
+  BTC_V5_REVISION,
+  DEFAULT_BTC_V5,
+  BTC_V5_FIVE_MINUTE_HISTORY,
+} from './btc-v5.config';
+import { strategyConfiguration } from './versions';
+import { fifteenMinuteCloses, TrendClose } from './fifteen-minute-bars';
 
 export interface V5Assessment {
   at: number;
@@ -11,134 +18,293 @@ export interface V5Assessment {
   reason: string;
   conditions: Record<string, boolean>;
   features?: {
-    atr1h: number; atrFraction: number; ema4hFast: number; ema4hSlow: number;
-    ema1hFast: number; ema15m: number; entryEma: number; stopPrice: number;
-    targetPrice: number; rewardRisk: number;
+    atr5m: number;
+    atrFraction: number;
+    trendTimeframe: '15m' | '1h';
+    trendEmaFast: number;
+    trendEmaSlow: number;
+    ema1hFast?: number;
+    ema1hSlow?: number;
+    ema5mFast: number;
+    ema5mSlow: number;
+    entryEma: number;
+    stopPrice: number;
+    targetPrice: number;
+    rewardRisk: number;
+    netRewardRisk: number;
+    estimatedRoundTripCostFraction: number;
+    netTargetFraction: number;
+    bandLower: number;
+    bandMiddle: number;
+    bandUpper: number;
+    minimumTargetPrice: number;
+    stopLossEnabled: boolean;
+    referenceStopPrice: number;
   };
   signal?: MarketSignal;
 }
 
 const MINUTE = 60000;
-const HOUR = 60 * MINUTE;
 
-/** Aggregates only complete, contiguous bars. No unfinished higher-timeframe bar leaks into a signal. */
-const aggregate = (bars: Candle[], sourceStep: number, bucketStep: number): Candle[] => {
-  const grouped = new Map<number, Candle[]>();
-  for (const bar of bars) {
-    const bucket = Math.floor(bar.openTime / bucketStep) * bucketStep;
-    const group = grouped.get(bucket) ?? [];
-    group.push(bar);
-    grouped.set(bucket, group);
-  }
-  const expected = bucketStep / sourceStep;
-  return [...grouped.entries()].sort(([a], [b]) => a - b).flatMap(([openTime, group]) => {
-    const ordered = group.sort((a, b) => a.openTime - b.openTime);
-    if (ordered.length !== expected || ordered.some((bar, index) => bar.openTime !== openTime + index * sourceStep)) return [];
-    return [{
-      symbol: 'BTCUSDT' as const,
-      timeframe: ordered[0].timeframe,
-      openTime,
-      closeTime: openTime + bucketStep - 1,
-      open: ordered[0].open,
-      high: Math.max(...ordered.map((bar) => bar.high)),
-      low: Math.min(...ordered.map((bar) => bar.low)),
-      close: ordered.at(-1)!.close,
-      volume: ordered.reduce((sum, bar) => sum + bar.volume, 0),
-    }];
-  });
-};
-
-/**
- * V5 tests a specific hypothesis: failed V4 continuations can be reduced by
- * requiring a healthy 4h trend, a 1h higher-low, a 15m pullback/retest, and a
- * one-minute recovery and a 15m volume confirmation. The recovery gate after
- * a stop is retained as defence in depth; size never increases after loss.
- */
+/** PAPER hypothesis: 15m trend, confirmed 5m oversold recovery, 1m entry. */
 export class BtcV5Strategy {
+  private trendCache?: { first: Candle; last: Candle; length: number; closes: TrendClose[] };
   assess(input: MarketHistory, config: SimulationConfig): V5Assessment {
+    config = strategyConfiguration('btc-v5', config);
     const last = input['1m'].at(-1);
     const at = last?.closeTime ?? 0;
-    const parameters = { ...DEFAULT_BTC_V5, ...config.btcV5 };
-    const no = (reason: string, conditions: Record<string, boolean> = {}, features?: V5Assessment['features']): V5Assessment =>
-      ({ at, decision: 'NO_TRADE', reason, conditions, features });
+    const p = { ...DEFAULT_BTC_V5, ...config.btcV5 };
+    const targetOnly = p.exitMode === 'TARGET_ONLY';
+    const no = (
+      reason: string,
+      conditions: Record<string, boolean> = {},
+      features?: V5Assessment['features'],
+    ): V5Assessment => ({ at, decision: 'NO_TRADE', reason, conditions, features });
     if (!last) return no('MISSING_CLOSED_DATA');
-
-    const hours = input['1h'].filter((bar) => bar.closeTime <= at).slice(-500);
-    const fives = input['5m'].filter((bar) => bar.closeTime <= at).slice(-100);
+    if (!validV5Parameters(p)) return no('INVALID_BTC_V5_CONFIG');
+    const hours = input['1h'].filter((bar) => bar.closeTime <= at).slice(-100);
+    const fiveSource = input['5m']
+      .filter((bar) => bar.closeTime <= at)
+      .slice(-BTC_V5_FIVE_MINUTE_HISTORY);
+    const fives = fiveSource.slice(-100);
     const minutes = input['1m'].filter((bar) => bar.closeTime <= at).slice(-100);
-    const contiguous = (bars: Candle[], step: number) => bars.every((bar, index) => index === 0 || bar.openTime === bars[index - 1].openTime + step);
-    if (hours.length < parameters.trendEmaSlow * 4 || fives.length < 60 || minutes.length < parameters.entryEmaPeriod + parameters.entryPullbackMinutes + 1 || !contiguous(hours, HOUR) || !contiguous(fives, 5 * MINUTE) || !contiguous(minutes, MINUTE))
+    const aligned = (bars: readonly Pick<Candle, 'openTime' | 'closeTime'>[], step: number) =>
+      bars.every(
+        (bar, index) =>
+          bar.openTime % step === 0 &&
+          bar.closeTime === bar.openTime + step - 1 &&
+          (index === 0 || bar.openTime === bars[index - 1].openTime + step),
+      );
+    if (
+      fives.length <
+        Math.max(p.setupEmaSlow + 1, p.reversionPeriod + 1, 15, p.setupPullbackBars + 1) ||
+      minutes.length < p.entryEmaPeriod + p.entryPullbackMinutes + 1 ||
+      !aligned(fiveSource, 5 * MINUTE) ||
+      !aligned(minutes, MINUTE) ||
+      at - fives.at(-1)!.closeTime >= 5 * MINUTE
+    )
       return no('MISSING_OR_UNALIGNED_DATA');
-
-    const fours = aggregate(hours, HOUR, 4 * HOUR).slice(-100);
-    const fifteens = aggregate(fives, 5 * MINUTE, 15 * MINUTE).slice(-30);
-    const currentHour = hours.at(-1);
-    const current15m = fifteens.at(-1);
-    const previousMinute = minutes.at(-2);
-    if (!currentHour || !current15m || !previousMinute || fours.length < parameters.trendEmaSlow || fifteens.length < 21)
+    let trend: readonly TrendClose[] = hours;
+    if (p.trendMinutes === 15) {
+      // Closed market candles are immutable; reuse the aggregate within the same 5m bar.
+      const cached = this.trendCache;
+      const closes =
+        cached &&
+        cached.first === fiveSource[0] &&
+        cached.last === fiveSource.at(-1) &&
+        cached.length === fiveSource.length
+          ? cached.closes
+          : fifteenMinuteCloses(fiveSource).slice(-100);
+      this.trendCache = {
+        first: fiveSource[0],
+        last: fiveSource.at(-1)!,
+        length: fiveSource.length,
+        closes,
+      };
+      trend = closes;
+    }
+    const trendStep = p.trendMinutes * MINUTE;
+    if (
+      trend.length < p.trendEmaSlow + 1 ||
+      !aligned(trend, trendStep) ||
+      at - trend.at(-1)!.closeTime >= trendStep
+    )
       return no('MISSING_OR_UNALIGNED_DATA');
-
-    const ema4hFast = indicators.calculateEMA(fours.map((bar) => bar.close), parameters.trendEmaFast);
-    const ema4hSlow = indicators.calculateEMA(fours.map((bar) => bar.close), parameters.trendEmaSlow);
-    const prior4hFast = indicators.calculateEMA(fours.slice(0, -1).map((bar) => bar.close), parameters.trendEmaFast);
-    const prior4hSlow = indicators.calculateEMA(fours.slice(0, -1).map((bar) => bar.close), parameters.trendEmaSlow);
-    const ema1hFast = indicators.calculateEMA(hours.map((bar) => bar.close), parameters.trendEmaFast);
-    const ema1hSlow = indicators.calculateEMA(hours.map((bar) => bar.close), parameters.trendEmaSlow);
-    const atr1h = indicators.calculateATR(hours, 14);
-    const ema15m = indicators.calculateEMA(fifteens.map((bar) => bar.close), parameters.trendEmaFast);
-    const prior15mVolume = indicators.calculateSMA(fifteens.slice(0, -1).slice(-10).map((bar) => bar.volume), 10);
-    const entryEma = indicators.calculateEMA(minutes.map((bar) => bar.close), parameters.entryEmaPeriod);
-    if ([ema4hFast, ema4hSlow, prior4hFast, prior4hSlow, ema1hFast, ema1hSlow, atr1h, ema15m, prior15mVolume, entryEma].some((value) => value === null) || atr1h! <= 0)
+    const ema = (bars: readonly Pick<Candle, 'close'>[], period: number) =>
+      indicators.calculateEMA(
+        bars.map((bar) => bar.close),
+        period,
+      )!;
+    const trendEmaFast = ema(trend, p.trendEmaFast);
+    const trendEmaSlow = ema(trend, p.trendEmaSlow);
+    const ema5mFast = ema(fives, p.setupEmaFast);
+    const ema5mSlow = ema(fives, p.setupEmaSlow);
+    const entryEma = ema(minutes, p.entryEmaPeriod);
+    const atr = indicators.calculateATR(fives, 14);
+    // Freeze the range before the recovery candle. It cannot move the target in its own favor.
+    const bands = indicators.calculateBollingerBands(
+      fives.slice(0, -1).map((bar) => bar.close),
+      p.reversionPeriod,
+      p.reversionStdDev,
+    );
+    if (
+      atr === null ||
+      atr <= 0 ||
+      !bands ||
+      ![trendEmaFast, trendEmaSlow, ema5mFast, ema5mSlow, entryEma].every(Number.isFinite)
+    )
       return no('MISSING_INDICATORS');
-
     const entryPrice = last.close;
-    const swingLow = Math.min(...hours.slice(-parameters.hourStructureLookback).map((bar) => bar.low));
-    const stopPrice = Math.min(swingLow - parameters.swingBufferAtr * atr1h!, entryPrice - parameters.stopAtr1h * atr1h!);
+    const setupWindow = fives.slice(-p.setupPullbackBars);
+    const minuteWindow = minutes.slice(-(p.entryPullbackMinutes + 1), -1);
+    const swingLow = Math.min(...fives.slice(-p.setupPullbackBars).map((bar) => bar.low));
+    const stopPrice = floorStep(
+      Math.min(
+        swingLow - p.swingBufferAtr * atr,
+        entryPrice - Math.max(p.stopAtr5m * atr, p.minStopFraction * entryPrice),
+      ),
+      config.tickSize,
+    ).toNumber();
     const riskPerUnit = entryPrice - stopPrice;
-    const marketImpact = (config.spreadBps / 2 + config.slippageBps) / 10000;
-    const entryCost = entryPrice * (1 + marketImpact) * (1 + config.feeRate);
-    const stopProceeds = stopPrice * (1 - marketImpact) * (1 - config.feeRate);
-    const targetPrice = (entryCost + parameters.targetRiskMultiple * (entryCost - stopProceeds)) / (1 - config.feeRate) + 10 * config.tickSize;
-    const priorHourLow = Math.min(...hours.slice(-(parameters.hourStructureLookback + 1), -1).map((bar) => bar.low));
-    const fifteenPullback = fifteens.slice(-4, -1);
-    const fifteenBreakout = Math.max(...fifteens.slice(-(parameters.fifteenBreakoutLookback + 1), -1).map((bar) => bar.high));
-    const minutePullback = minutes.slice(-(parameters.entryPullbackMinutes + 1), -1);
+    const impact = (config.spreadBps / 2 + config.slippageBps) / 10000;
+    // Charge impact on both sides, including target exits. Execution rechecks actual fills and rounding.
+    const entryCost = entryPrice * (1 + impact) * (1 + config.feeRate);
+    const sellFactor = (1 - impact) * (1 - config.feeRate);
+    const netStopLoss = entryCost - stopPrice * sellFactor;
+    const requiredProfit = Math.max(
+      p.targetRiskMultiple * netStopLoss,
+      entryPrice * p.minNetTargetFraction,
+    );
+    const minimumTargetPrice = (entryCost + requiredProfit) / sellFactor + 2 * config.tickSize;
+    // Do not invent a farther target to make the reward/risk test pass.
+    const targetPrice = floorStep(
+      Math.min(bands.upper, entryPrice * (1 + p.maxTargetFraction)),
+      config.tickSize,
+    ).toNumber();
+    const netTarget = targetPrice * sellFactor - entryCost;
+    const netRewardRisk = netStopLoss > 0 ? netTarget / netStopLoss : 0;
+    const five = fives.at(-1)!;
     const conditions: Record<string, boolean> = {
-      trend4h: ema4hFast! > ema4hSlow! && fours.at(-1)!.close > ema4hFast! && ema4hFast! > prior4hFast! && ema4hSlow! >= prior4hSlow!,
-      structure1h: ema1hFast! > ema1hSlow! && currentHour.close > ema1hFast! && currentHour.low > priorHourLow,
-      retest15m: Math.min(...fifteenPullback.map((bar) => bar.low)) <= ema15m! && current15m.close > ema15m! && current15m.close > fifteenBreakout,
-      recovery1m: last.close > last.open && last.close > previousMinute.high && last.close > entryEma! && Math.min(...minutePullback.map((bar) => bar.low)) <= entryEma!,
-      notExtended: entryPrice - ema1hFast! <= parameters.maxEntryExtensionAtr * atr1h!,
-      volatility: atr1h! / entryPrice >= parameters.minAtr1hFraction && atr1h! / entryPrice <= parameters.maxAtr1hFraction,
-      stopGeometry: stopPrice > 0 && stopPrice < entryPrice && riskPerUnit / entryPrice <= config.maxStopPercent,
-      rewardRisk: targetPrice > entryPrice && (targetPrice - entryPrice) / riskPerUnit >= parameters.targetRiskMultiple,
-      recoveryQuality: current15m.volume >= prior15mVolume! * parameters.recoveryVolumeMultiplier && currentHour.close > currentHour.open,
+      [p.trendMinutes === 15 ? 'trend15m' : 'trend1h']:
+        trendEmaFast > trendEmaSlow && trend.at(-1)!.close > trendEmaSlow,
+      oversoldReclaim5m:
+        Math.min(...setupWindow.map((bar) => bar.low)) <= bands.lower &&
+        five.close > bands.lower &&
+        five.close > five.open &&
+        five.close > fives.at(-2)!.close,
+      recovery1m:
+        last.close > last.open &&
+        last.close > minutes.at(-2)!.high &&
+        last.close > entryEma &&
+        Math.min(...minuteWindow.map((bar) => bar.low)) <= entryEma,
+      notExtended:
+        entryPrice > bands.lower &&
+        entryPrice < bands.middle &&
+        Math.abs(entryPrice - five.close) <= p.maxEntryExtensionAtr * atr,
+      volatility: atr / entryPrice >= p.minAtr5mFraction && atr / entryPrice <= p.maxAtr5mFraction,
+      [targetOnly ? 'referenceGeometry' : 'stopGeometry']:
+        stopPrice > 0 &&
+        stopPrice < entryPrice &&
+        riskPerUnit / entryPrice <= config.maxStopPercent,
+      costCoverage:
+        netTarget / entryPrice >= p.minNetTargetFraction &&
+        targetPrice <= entryPrice * (1 + p.maxTargetFraction),
+      [targetOnly ? 'referenceRewardRisk' : 'rewardRisk']: netRewardRisk >= p.targetRiskMultiple,
+      targetRoom: targetPrice >= minimumTargetPrice,
+      // Retained for the post-loss quality gate in RiskPolicy.
+      recoveryQuality: five.close > five.open && last.close > minutes.at(-2)!.high,
     };
-    const features = { atr1h: atr1h!, atrFraction: atr1h! / entryPrice, ema4hFast: ema4hFast!, ema4hSlow: ema4hSlow!, ema1hFast: ema1hFast!, ema15m: ema15m!, entryEma: entryEma!, stopPrice, targetPrice, rewardRisk: riskPerUnit > 0 ? (targetPrice - entryPrice) / riskPerUnit : 0 };
-    // V5.2 admits only confirmed breakouts. The 2025 audit showed that the
-    // prior optional-volume entries mostly continued lower after their stop,
-    // so widening stops would hide rather than solve the failed continuation.
-    const required = Object.keys(conditions);
-    const failed = required.filter((key) => !conditions[key]);
-    if (failed.length) return no(failed.map((key) => `NO_${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`).join('|'), conditions, features);
+    const features = {
+      atr5m: atr,
+      atrFraction: atr / entryPrice,
+      trendTimeframe: p.trendMinutes === 15 ? ('15m' as const) : ('1h' as const),
+      trendEmaFast,
+      trendEmaSlow,
+      ...(p.trendMinutes === 60 ? { ema1hFast: trendEmaFast, ema1hSlow: trendEmaSlow } : {}),
+      ema5mFast,
+      ema5mSlow,
+      entryEma,
+      stopPrice: targetOnly ? 0 : stopPrice,
+      targetPrice,
+      rewardRisk: riskPerUnit > 0 ? (targetPrice - entryPrice) / riskPerUnit : 0,
+      netRewardRisk,
+      estimatedRoundTripCostFraction: (entryCost - entryPrice * sellFactor) / entryPrice,
+      netTargetFraction: netTarget / entryPrice,
+      bandLower: bands.lower,
+      bandMiddle: bands.middle,
+      bandUpper: bands.upper,
+      minimumTargetPrice,
+      stopLossEnabled: !targetOnly,
+      referenceStopPrice: stopPrice,
+    };
+    const failed = Object.keys(conditions).filter((key) => !conditions[key]);
+    if (failed.length)
+      return no(
+        failed
+          .map((key) => `NO_${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`)
+          .join('|'),
+        conditions,
+        features,
+      );
     const id = createHash('sha256').update(`btc-v5:${BTC_V5_REVISION}:BTCUSDT:${at}`).digest('hex');
     const signal: MarketSignal = {
-      id, strategy: 'btc-v5', strategyRevision: BTC_V5_REVISION, symbol: 'BTCUSDT', candleTime: at,
-      referencePrice: entryPrice, atr: atr1h!, swingLow: stopPrice, regime: 'up', conditions,
-      config: { ...config, btcV5: parameters },
-      protection: { stopPrice: floorStep(stopPrice, config.tickSize).toNumber(), targetPrice: floorStep(targetPrice, config.tickSize).toNumber(), horizonMs: parameters.horizonMinutes * MINUTE, timeframe: '1h' },
+      id,
+      strategy: 'btc-v5',
+      strategyRevision: BTC_V5_REVISION,
+      symbol: 'BTCUSDT',
+      candleTime: at,
+      referencePrice: entryPrice,
+      atr,
+      swingLow: stopPrice,
+      regime: 'up',
+      conditions,
+      config: { ...config, btcV5: p },
+      protection: {
+        stopPrice: targetOnly ? 0 : stopPrice,
+        targetPrice,
+        horizonMs: targetOnly ? 0 : p.horizonMinutes * MINUTE,
+        timeframe: '5m',
+        exitMode: p.exitMode,
+      },
     };
-    return { at, decision: 'BUY', reason: 'STRUCTURE_RETEST_RECOVERY', conditions, features, signal };
+    return {
+      at,
+      decision: 'BUY',
+      reason: 'OVERSOLD_RECLAIM_5M_RECOVERY_1M',
+      conditions,
+      features,
+      signal,
+    };
   }
 }
 
-export const validV5Parameters = (parameters: BtcV5Parameters): boolean =>
-  parameters.revision === BTC_V5_REVISION &&
-  Object.entries(parameters).every(([key, value]) => key === 'revision' || (typeof value === 'number' && Number.isFinite(value) && value >= 0)) &&
-  parameters.horizonMinutes >= 60 && parameters.horizonMinutes <= 10080 &&
-  Number.isInteger(parameters.trendEmaFast) && Number.isInteger(parameters.trendEmaSlow) && parameters.trendEmaFast >= 5 && parameters.trendEmaFast < parameters.trendEmaSlow && parameters.trendEmaSlow <= 100 &&
-  Number.isInteger(parameters.hourStructureLookback) && parameters.hourStructureLookback >= 3 && parameters.hourStructureLookback <= 24 &&
-  Number.isInteger(parameters.fifteenBreakoutLookback) && parameters.fifteenBreakoutLookback >= 3 && parameters.fifteenBreakoutLookback <= 20 &&
-  Number.isInteger(parameters.entryEmaPeriod) && parameters.entryEmaPeriod >= 3 && parameters.entryEmaPeriod <= 30 &&
-  Number.isInteger(parameters.entryPullbackMinutes) && parameters.entryPullbackMinutes >= 2 && parameters.entryPullbackMinutes <= 30 &&
-  parameters.stopAtr1h > 0 && parameters.targetRiskMultiple >= 1.25 && parameters.maxEntryExtensionAtr > 0 && parameters.minAtr1hFraction < parameters.maxAtr1hFraction && parameters.recoveryVolumeMultiplier >= 1 && parameters.maxConsecutiveStopLosses >= 1 && Number.isInteger(parameters.maxConsecutiveStopLosses);
+export const validV5Parameters = (p: BtcV5Parameters): boolean =>
+  p.revision === BTC_V5_REVISION &&
+  ['STOP_TARGET', 'TARGET_ONLY'].includes(p.exitMode) &&
+  [15, 60].includes(p.trendMinutes) &&
+  Object.keys(DEFAULT_BTC_V5).every(
+    (key) =>
+      key === 'revision' ||
+      key === 'exitMode' ||
+      (typeof p[key] === 'number' && Number.isFinite(p[key]) && p[key] >= 0),
+  ) &&
+  Object.keys(p).every((key) => Object.hasOwn(DEFAULT_BTC_V5, key)) &&
+  Number.isInteger(p.horizonMinutes) &&
+  p.horizonMinutes >= 15 &&
+  p.horizonMinutes <= 360 &&
+  [p.trendEmaFast, p.trendEmaSlow, p.setupEmaFast, p.setupEmaSlow, p.entryEmaPeriod].every(
+    (n) => Number.isInteger(n) && n >= 3 && n <= 50,
+  ) &&
+  p.trendEmaFast < p.trendEmaSlow &&
+  p.setupEmaFast < p.setupEmaSlow &&
+  Number.isInteger(p.reversionPeriod) &&
+  p.reversionPeriod >= 10 &&
+  p.reversionPeriod <= 50 &&
+  p.reversionStdDev >= 1 &&
+  p.reversionStdDev <= 3 &&
+  Number.isInteger(p.setupPullbackBars) &&
+  p.setupPullbackBars >= 2 &&
+  p.setupPullbackBars <= 12 &&
+  Number.isInteger(p.entryPullbackMinutes) &&
+  p.entryPullbackMinutes >= 2 &&
+  p.entryPullbackMinutes <= 30 &&
+  p.stopAtr5m > 0 &&
+  p.minStopFraction > 0 &&
+  p.minStopFraction < p.maxTargetFraction &&
+  p.targetRiskMultiple >= 1.25 &&
+  p.minNetTargetFraction > 0 &&
+  p.maxTargetFraction <= 0.02 &&
+  p.maxEntryExtensionAtr > 0 &&
+  p.minAtr5mFraction > 0 &&
+  p.minAtr5mFraction < p.maxAtr5mFraction &&
+  Number.isInteger(p.maxConsecutiveStopLosses) &&
+  p.maxConsecutiveStopLosses >= 1 &&
+  Number.isInteger(p.cooldownMinutes) &&
+  p.cooldownMinutes >= 1 &&
+  Number.isInteger(p.stopCooldownMinutes) &&
+  p.stopCooldownMinutes >= p.cooldownMinutes &&
+  Number.isInteger(p.maxDailyEntries) &&
+  p.maxDailyEntries >= 1 &&
+  p.maxDailyEntries <= 24 &&
+  p.maxCapitalLossFraction > 0 &&
+  p.maxCapitalLossFraction <= 0.02;

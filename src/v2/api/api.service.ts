@@ -354,9 +354,13 @@ export class ApiService {
   async strategies() {
     const rows = await this.db.getRepository(StrategyVersionRow).find();
     return Promise.all((['legacy-v1','btc-v2','btc-v3','btc-v4','btc-v5','trend-reference'] as StrategyId[]).map(async id=>{
-      const row=rows.find(r=>r.id===id),configuration=row?.state.configuration??strategyConfiguration(id,id==='btc-v3'&&this.settings.btcV3Calibration?{btcV3Calibration:this.settings.btcV3Calibration}:{}),hash=configurationHash(id,revisionFor(id),configuration);
-      return {id,revision:revisionFor(id),active:row?.state.active ?? id===selectedStrategy(),lastEvaluationAt:row?.state.lastCandleTime??0,eligible:row?.state.eligible??false,configuration,configurationHash:hash,calibrationReady:!!configuration.btcV3Calibration,lastDecision:row?.state.lastDecision,
-        description:id==='btc-v5'?'Experimental PAPER V5.2: tendencia 4h, estructura 1h, retest y volumen confirmado 15m, entrada 1m. Tras dos stops, espera un cierre 4h.':id==='btc-v4'?'Candidata PAPER V4.5: contexto y pullback 4h; entrada de recuperación evaluada cada minuto, con stop/objetivo estructurales.':id==='btc-v3'?'Experimental: tendencia 1h, retroceso/ATR 5m, recuperación 1m y abstención calibrada.':id==='btc-v2'?'Baseline original: tendencia 1h, confirmación 5m y entrada 1m.':id==='trend-reference'?'Referencia de backtest, sin selección operativa.':'Indicadores originales y puntuación 5/7.'};
+      const row=rows.find(r=>r.id===id);
+      const currentSnapshot=id!=='btc-v5'||(row?.revision===revisionFor(id)&&row.state.configuration?.btcV5?.revision===revisionFor(id));
+      const savedConfiguration=currentSnapshot?row?.state.configuration:undefined;
+      const configuration=savedConfiguration??strategyConfiguration(id,id==='btc-v5'?this.settings.config:id==='btc-v3'&&this.settings.btcV3Calibration?{btcV3Calibration:this.settings.btcV3Calibration}:{});
+      const hash=configurationHash(id,revisionFor(id),configuration);
+      return {id,revision:revisionFor(id),active:row?.state.active ?? id===selectedStrategy(),lastEvaluationAt:currentSnapshot?(row?.state.lastCandleTime??0):0,eligible:currentSnapshot?(row?.state.eligible??false):false,configuration,configurationHash:hash,calibrationReady:!!configuration.btcV3Calibration,lastDecision:currentSnapshot?row?.state.lastDecision:undefined,
+        description:id==='btc-v5'?'Experimental PAPER V5: tendencia configurable 15m/1h, recuperacion 5m y entrada 1m. Salidas segun exitMode; TARGET_ONLY no tiene stop ni vencimiento.':id==='btc-v4'?'Candidata PAPER V4.5: contexto y pullback 4h; entrada de recuperación evaluada cada minuto, con stop/objetivo estructurales.':id==='btc-v3'?'Experimental: tendencia 1h, retroceso/ATR 5m, recuperación 1m y abstención calibrada.':id==='btc-v2'?'Baseline original: tendencia 1h, confirmación 5m y entrada 1m.':id==='trend-reference'?'Referencia de backtest, sin selección operativa.':'Indicadores originales y puntuación 5/7.'};
     }));
   }
   async activateStrategy(id: StrategyId) {

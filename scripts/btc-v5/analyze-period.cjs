@@ -82,8 +82,34 @@ const stopFollowThrough = {
   averageMfeBeforeStopPct: stopped.length ? round(stopped.reduce((sum, position) => sum + position.maxFavorableExcursionPct, 0) / stopped.length) : 0,
   averageFurtherDrawdownAfterStopPct: stopped.length ? round(stopped.reduce((sum, position) => sum + (position.postStopFurtherDrawdownPct ?? 0), 0) / stopped.length) : 0,
 };
+// Reconcile quote cash flows independently of the position P&L accumulator.
+// The default V5 replay charges both commissions in USDT; reject unsupported
+// fee modes instead of silently treating a BTC commission as quote currency.
+if (report.fills.some(fill => fill.commissionAsset !== 'USDT'))
+  throw new Error('AUDIT_REQUIRES_USDT_COMMISSIONS');
+const fillNet = report.fills.reduce((sum, fill) => sum +
+  (fill.side === 'SELL' ? Number(fill.quote) : -Number(fill.quote)) - Number(fill.commission), 0);
+const ledgerNet = report.ledger.filter(entry => entry.asset === 'USDT').reduce((sum, entry) =>
+  sum + Number(entry.availableDelta) + Number(entry.reservedDelta), 0);
+const balanceNet = Number(report.balance.available) + Number(report.balance.reserved) - Number(report.balance.initialCapital);
+const closedPnl = closed.reduce((sum, position) => sum + position.realizedPnl, 0);
+const fullyFlat = report.trades.every(position => Number(position.quantity) === 0) && Number(report.balance.reserved) === 0;
+const differences = {
+  fillsVsLedger: fillNet - ledgerNet,
+  fillsVsCash: fillNet - balanceNet,
+  ...(fullyFlat ? { fillsVsClosedPnl: fillNet - closedPnl } : {}),
+};
+const accountingAudit = {
+  fullyFlat, quoteCashFlowNet: fillNet, ledgerNet, balanceNet, closedPnl, differences,
+  reconciled: Object.values(differences).every(value => Math.abs(value) < 1e-8),
+  sameExecutedTradesBeforeCommissions: fillNet + report.metrics.totalCommissions,
+  // This arithmetic attribution is not a counterfactual zero-fee backtest.
+  attributionPolicy: 'Add back commissions to the same executed trades; keep their fills, spread and slippage unchanged.',
+};
+if (!accountingAudit.reconciled) throw new Error('AUDIT_ACCOUNTING_MISMATCH');
 const result = {
-  strategy: 'btc-v5', start, end, metrics: report.metrics,
+  strategy: 'btc-v5', revision: report.strategyRevision, datasetHash: report.datasetHash,
+  start, end, metrics: report.metrics, accountingAudit,
   exits: groupBy('exitReason'), stopFollowThrough,
   monthly: groupBy('month'),
   decisionReasons,

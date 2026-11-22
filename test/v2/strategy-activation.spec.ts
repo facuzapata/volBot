@@ -6,8 +6,40 @@ import { SimulationSettings } from '../../src/v2/market/simulation-settings';
 import { StrategyVersionRow } from '../../src/v2/persistence/entities';
 import { StoreService } from '../../src/v2/persistence/store.service';
 import { StrategyApprovalService } from '../../src/v2/strategy/approval.service';
+import { strategyConfiguration } from '../../src/v2/strategy/versions';
+import { BTC_V5_REVISION } from '../../src/v2/strategy/btc-v5.config';
 
 describe('strategy activation', () => {
+  const v5Service = (rows: unknown[]) => new ApiService(
+    { db: { getRepository: () => ({ find: async () => rows }) } } as unknown as StoreService,
+    {} as never, new PaperExecutionAdapter(), { ready: true } as RedisCacheService,
+    new BacktestingEngine(), {} as StrategyApprovalService,
+    { config: strategyConfiguration('btc-v5') } as SimulationSettings, {} as never,
+  );
+
+  it('does not expose a stale V5 configuration as the newly deployed revision', async () => {
+    const old = strategyConfiguration('btc-v5');
+    old.btcV5 = { ...old.btcV5!, revision: '2026-11-22.v5.2', trendMinutes: 60, exitMode: 'STOP_TARGET' };
+    const service = v5Service([{ id: 'btc-v5', revision: '2026-11-22.v5.2',
+      state: { active: true, eligible: true, lastCandleTime: 123, configuration: old,
+        lastDecision: { decision: 'BUY', reason: 'OLD_SETUP' } } }]);
+    const strategy = (await service.strategies()).find(s => s.id === 'btc-v5')!;
+    expect(strategy).toMatchObject({ active: true, revision: BTC_V5_REVISION, eligible: false, lastEvaluationAt: 0,
+      configuration: { btcV5: { revision: BTC_V5_REVISION, trendMinutes: 15, exitMode: 'TARGET_ONLY' } } });
+    expect(strategy.lastDecision).toBeUndefined();
+  });
+
+  it('preserves a current V5 worker snapshot and its actual costs and decision', async () => {
+    const configuration = strategyConfiguration('btc-v5', { feeRate: 0.00075 });
+    const service = v5Service([{ id: 'btc-v5', revision: BTC_V5_REVISION,
+      state: { active: true, eligible: true, lastCandleTime: 123, configuration,
+        lastDecision: { decision: 'BUY', reason: 'CURRENT_SETUP' } } }]);
+    const strategy = (await service.strategies()).find(s => s.id === 'btc-v5')!;
+    expect(strategy.configuration).toBe(configuration);
+    expect(strategy).toMatchObject({ eligible: true, lastEvaluationAt: 123,
+      configuration: { feeRate: 0.00075 }, lastDecision: { reason: 'CURRENT_SETUP' } });
+  });
+
   it('keeps exactly the selected strategy active for future signals', async () => {
     const rows = [
       { id: 'btc-v2', revision: '2026-11-20.1', state: { active: true, eligible: false, lastCandleTime: 0, lastSignalTime: 0 } },

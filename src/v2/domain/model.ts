@@ -20,7 +20,7 @@ export interface SimulationConfig {
   btcV3Calibration?:BtcV3Calibration;
   /** Frozen parameters for the BTC-V4 PAPER candidate. */
   btcV4?: BtcV4Parameters;
-  /** Frozen parameters for the BTC-V5 structure/retest candidate. */
+  /** Frozen parameters for the BTC-V5 intraday PAPER candidate. */
   btcV5?: BtcV5Parameters;
   buyCommissionAsset?: 'USDT' | 'BTC';
   stopModel?: 'STRUCTURE_ATR' | 'ATR_ONLY';
@@ -81,10 +81,12 @@ export interface MarketSignal {
   regime: string;
   conditions: Record<string, boolean>;
   config: SimulationConfig;
-  protection?: { stopPrice: number; targetPrice: number; horizonMs: number; timeframe: '5m'|'1h'|'4h' };
+  protection?: { stopPrice: number; targetPrice: number; horizonMs: number; timeframe: '5m'|'1h'|'4h'; exitMode?: 'STOP_TARGET'|'TARGET_ONLY' };
   forecast?:{calibrationId:string;sampleCount:number;expectedGrossReturn:number;expectedGrossLower95:number;favorablePotentialP25:number;roundTripBreakEven:number};
 }
 export interface ExecutionRisk {
+  /** FULL_NOTIONAL means the whole cost can be lost, with no active stop. */
+  riskModel?: 'STOP_DISTANCE' | 'FULL_NOTIONAL';
   at: number;
   referencePrice: string;
   executedPrice: string;
@@ -181,7 +183,7 @@ export interface Position {
   /** Execution venue chosen when this position was opened; never rewritten by later account changes. */
   executionMode: 'PAPER' | 'LIVE';
   strategyRevision?: string;
-  protectionMode?: 'ABSOLUTE'|'REANCHORED';
+  protectionMode?: 'ABSOLUTE'|'REANCHORED'|'TARGET_ONLY';
   plannedStop?: string;
   plannedTarget?: string;
   entryReferenceQuote?: string;
@@ -227,7 +229,7 @@ export interface VirtualAccount {
   lastLiquidityObservation?: LiquidityObservation;
   /** Timestamp after which BTC-V4 stop exits count toward its next automatic safety halt. */
   v4StopHaltAt?: number;
-  /** V5 pauses after a stop-loss streak; it never increases the next order size. */
+  /** V5 pauses after consecutive net losses; it never increases the next order size. */
   v5RecoveryBlockedUntil?: number;
   v5RecoveryResetAt?: number;
 }
@@ -243,3 +245,8 @@ export const isOrderOpen = (o: ExchangeOrder): boolean =>
   ['PENDING', 'PARTIALLY_FILLED', 'UNKNOWN'].includes(o.status);
 export const isPositionOpen = (p: Position): boolean =>
   ['OPENING', 'OPEN', 'CLOSING', 'DUST'].includes(p.status);
+
+/** A missing stop is intentional only for this explicitly selected V5 PAPER mode. */
+export const isTargetOnlyPosition = (p: Position): boolean =>
+  p.strategy === 'btc-v5' && p.executionMode === 'PAPER' &&
+  p.protectionMode === 'TARGET_ONLY' && p.config.btcV5?.exitMode === 'TARGET_ONLY';

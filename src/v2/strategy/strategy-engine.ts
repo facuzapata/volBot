@@ -45,7 +45,7 @@ export class StrategyEngine {
     if(strategy==='btc-v5'){
       this.lastV3Assessment=undefined;
       const a=this.btcV5.assess(history,config);
-      this.lastAssessment={at:a.at,eligible:a.decision==='BUY',regime:a.conditions.trend4h?'up':'other',reason:a.reason,conditions:a.conditions,features:a.features};
+      this.lastAssessment={at:a.at,eligible:a.decision==='BUY',regime:(a.conditions.trend15m||a.conditions.trend1h)?'up':'other',reason:a.reason,conditions:a.conditions,features:a.features};
       return a.signal??null;
     }
     this.lastV3Assessment=undefined;

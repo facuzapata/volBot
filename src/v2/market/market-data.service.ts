@@ -7,6 +7,7 @@ import { CandleRow } from '../persistence/entities';
 import { StoreService } from '../persistence/store.service';
 import { INTERVAL_MS, PublicMarketClient, validCandle } from './public-market.client';
 import { SimulationSettings } from './simulation-settings';
+import { BTC_V5_FIVE_MINUTE_HISTORY } from '../strategy/btc-v5.config';
 
 @Injectable()
 export class MarketDataService implements OnModuleInit, OnModuleDestroy {
@@ -71,6 +72,11 @@ export class MarketDataService implements OnModuleInit, OnModuleDestroy {
       const latest = await this.store.db
         .getRepository(CandleRow)
         .findOne({ where: { timeframe: tf }, order: { openTime: 'DESC' } });
+      // Repair older databases that were seeded with only 100 five-minute bars.
+      if (tf === '5m' && latest && await this.store.db.getRepository(CandleRow).countBy({ timeframe: tf }) < BTC_V5_FIVE_MINUTE_HISTORY) {
+        const recent = await this.client.candles(tf, undefined, BTC_V5_FIVE_MINUTE_HISTORY);
+        for (const c of recent) await this.persist(c, true, true);
+      }
       let start = latest ? Number(latest.openTime) + INTERVAL_MS[tf] : undefined;
       let pages = 0;
       while (!this.stopped) {
@@ -79,7 +85,8 @@ export class MarketDataService implements OnModuleInit, OnModuleDestroy {
         // contiguous 1h candles immediately after a clean database start.
         // Seed more than that from public market data rather than making the
         // strategy wait over eight days for a fresh worker to accumulate them.
-        const initialLimit = tf === '1h' ? 500 : 100;
+        // V5's 15m EMA50 also needs at least 153 closed 5m bars; retain a full trend window.
+        const initialLimit = tf === '1h' ? 500 : tf === '5m' ? BTC_V5_FIVE_MINUTE_HISTORY : 100;
         const candles = await this.client.candles(tf, start, start === undefined ? initialLimit : 1000);
         for (const c of candles) await this.persist(c, true, !!latest);
         if (!candles.length || candles.length < 1000 || start === undefined) break;

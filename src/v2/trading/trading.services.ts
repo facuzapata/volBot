@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { simulationConfig, selectedStrategy } from '../config';
-import { Candle, isOrderOpen, MarketSignal } from '../domain/model';
+import { Candle, isOrderOpen, MarketSignal, isTargetOnlyPosition } from '../domain/model';
 import { DomainEvent } from '../events/contracts';
 import {
   EXECUTION_ADAPTER,
@@ -23,6 +23,8 @@ import { RiskPolicy } from '../risk/risk-policy';
 import { INTERVAL_MS } from '../market/public-market.client';
 import { StrategyApprovalService, configurationHash } from '../strategy/approval.service';
 import { revisionFor, strategyConfiguration } from '../strategy/versions';
+import { shouldPublishSignal } from '../strategy/signal-cadence';
+import { BTC_V5_FIVE_MINUTE_HISTORY } from '../strategy/btc-v5.config';
 
 export function alignedHistory(
   history: MarketHistory,
@@ -171,7 +173,7 @@ export class PositionManagerService {
           s.account.v4StopHaltAt = event.payload.candle.closeTime;
         }
           for (const p of s.positions.filter(
-            (p) => Number(p.quantity) > 0 && Number(p.stopLoss) <= 0,
+            (p) => !isTargetOnlyPosition(p) && Number(p.quantity) > 0 && Number(p.stopLoss) <= 0,
           ))
             await this.store.emit(
               tx,
@@ -208,7 +210,7 @@ export class StrategyServiceV2 {
         .where('c.timeframe = :timeframe', { timeframe })
         .andWhere("(c.data->>'closeTime')::bigint <= :at", { at })
         .orderBy('c.openTime', 'DESC')
-        .take(timeframe === '1h' ? 500 : 100)
+        .take(timeframe === '1h' ? 500 : timeframe === '5m' ? BTC_V5_FIVE_MINUTE_HISTORY : 100)
         .getMany();
       history[timeframe] = rows.reverse().map((x) => x.data);
     }
@@ -235,12 +237,13 @@ export class StrategyServiceV2 {
     // Position supervision always runs, regardless of entry enablement or signal availability.
     await this.positions.candle(event, history);
     const strategy = await this.activeStrategy();
-    const requiredTimeframes = strategy === 'btc-v4' ? ['1m', '1h'] as const : ['1m', '5m', '1h'] as const;
+    const configuration = this.configurationFor(strategy);
+    const requiredTimeframes = strategy === 'btc-v5' && configuration.btcV5?.trendMinutes === 15
+      ? ['1m', '5m'] as const : strategy === 'btc-v4' ? ['1m', '1h'] as const : ['1m', '5m', '1h'] as const;
     if ((strategy === 'btc-v2'||strategy==='btc-v3'||strategy==='btc-v4'||strategy==='btc-v5') && !alignedHistory(history, candle.closeTime, requiredTimeframes)) {
       if (event.payload.recovered) return;
       throw new Error('WAITING_FOR_ALIGNED_CLOSED_TIMEFRAMES');
     }
-    const configuration = this.configurationFor(strategy);
     const signal = this.engine.evaluate(history, strategy, configuration);
     await this.store.db.transaction(async (tx) => {
       const row = await tx.findOneOrFail(StrategyVersionRow, {
@@ -249,13 +252,13 @@ export class StrategyServiceV2 {
       });
       if (candle.closeTime <= row.state.lastCandleTime) return;
       await this.store.once(tx, `strategy:${strategy}`, event.eventId, async () => {
-        const risingEdge = !!signal && !row.state.eligible;
+        const publish = shouldPublishSignal(strategy, !!signal, row.state.eligible);
         const assessment = this.engine.lastAssessment;
         row.state = { ...row.state, eligible: !!signal, lastCandleTime: candle.closeTime,
           lastDecision:this.engine.lastV3Assessment?{decision:this.engine.lastV3Assessment.decision,reason:this.engine.lastV3Assessment.reason,features:this.engine.lastV3Assessment.features}:assessment?{decision:assessment.eligible?'BUY':'NO_TRADE',reason:assessment.reason,features:{regime:assessment.regime,conditions:assessment.conditions,...(assessment.features??{})}}:undefined,
           configuration, configurationHash: configurationHash(strategy, revisionFor(strategy), configuration) };
         if (
-          risingEdge &&
+          publish &&
           !event.payload.recovered &&
           Date.now() - candle.closeTime <= simulationConfig().signalMaxAgeMs
         ) {

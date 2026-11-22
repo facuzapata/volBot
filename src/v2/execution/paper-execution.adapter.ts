@@ -7,6 +7,7 @@ import {
   ExchangeOrder,
   isOrderOpen,
   isPositionOpen,
+  isTargetOnlyPosition,
   MarketSignal,
   CausalLiquidityBudget,
 } from '../domain/model';
@@ -110,7 +111,7 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
     const feeQuote = quote.mul(c.feeRate);
     const fee = baseFee ? qty.mul(c.feeRate) : feeQuote;
     if(o.side==='BUY'){
-      if(!Number.isFinite(p.stopDistance)||p.stopDistance<=0){terminal(s,o,'REJECTED',at,'INVALID_EXECUTION_GEOMETRY');return;}
+      if(!isTargetOnlyPosition(p)&&(!Number.isFinite(p.stopDistance)||p.stopDistance<=0)){terminal(s,o,'REJECTED',at,'INVALID_EXECUTION_GEOMETRY');return;}
       const risk=assessExecutionRisk(s,p,referencePrice,price,qty,at);o.executionRisk=risk;
       if(!risk.accepted){terminal(s,o,'REJECTED',at,risk.reason);return;}
       p.executionRisk=risk;
@@ -159,7 +160,7 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
       p.remainingCost = str(d(p.remainingCost).plus(cost));
       p.averageEntry = str(d(p.entryQuote).div(p.entryGrossQuantity));
       p.stopLoss=p.executionRisk!.stopPrice;
-      p.takeProfit = str((p.protectionMode==='ABSOLUTE'?d(p.plannedTarget!):d(p.averageEntry).mul(1+p.targetDistance)).div(c.tickSize).ceil().mul(c.tickSize));
+      p.takeProfit = str(((isTargetOnlyPosition(p)||p.protectionMode==='ABSOLUTE')?d(p.plannedTarget!):d(p.averageEntry).mul(1+p.targetDistance)).div(c.tickSize).ceil().mul(c.tickSize));
       p.highWater = str(Decimal.max(p.highWater, price));
       p.status = 'OPEN';
       s.ledger.push({
@@ -297,7 +298,8 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
     const budget=sharedBudget??causalLiquidity(candle.openTime,s.account.lastLiquidityObservation,rate,used);
     for (const p of s.positions.filter(isPositionOpen)) {
       if (p.openedAt >= candle.closeTime) continue;
-      if(d(p.quantity).gt(0)&&(!d(p.stopLoss).isFinite()||d(p.stopLoss).lte(0))){
+      const targetOnly = isTargetOnlyPosition(p);
+      if(!targetOnly&&d(p.quantity).gt(0)&&(!d(p.stopLoss).isFinite()||d(p.stopLoss).lte(0))){
         const exit=this.requestExit(s,p.id,candle.closeTime,'UNSAFE_PROTECTION','PROTECTION');
         if(exit)this.execute(s,exit.id,candle.close,candle.closeTime,budget,'CLOSE');
         continue;
@@ -311,7 +313,7 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
       const sellPending = s.orders.find(
         (o) => o.positionId === p.id && o.side === 'SELL' && isOrderOpen(o),
       );
-      const stopHit = d(p.quantity).gt(0) && candle.low <= Number(p.stopLoss);
+      const stopHit = !targetOnly && d(p.quantity).gt(0) && candle.low <= Number(p.stopLoss);
       const takeHit = d(p.quantity).gt(0) && candle.high >= Number(p.takeProfit);
       let exit = sellPending;
       if (exit?.type === 'LIMIT' && stopHit) {
@@ -338,7 +340,7 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
           Number(p.takeProfit),
         );
         price = Number(p.takeProfit);
-      } else if (!exit && ((invalidate && p.config.invalidationExit !== false) || (p.config.timeExit !== false && candle.closeTime - p.openedAt >= p.config.maxHoldingMs))) {
+      } else if (!exit && !targetOnly && ((invalidate && p.config.invalidationExit !== false) || (p.config.timeExit !== false && candle.closeTime - p.openedAt >= p.config.maxHoldingMs))) {
         exit = this.requestExit(
           s,
           p.id,
@@ -359,7 +361,7 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
         }
       }
       // Update trailing only AFTER evaluating this bar, so its high cannot protect an earlier low.
-      if (p.config.trailing && p.status === 'OPEN') {
+      if (!targetOnly && p.config.trailing && p.status === 'OPEN') {
         p.highWater = str(Decimal.max(p.highWater, candle.close));
         if (d(p.highWater).gte(d(p.averageEntry).mul(1 + p.config.trailingActivation)))
           p.stopLoss = str(

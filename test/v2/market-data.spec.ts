@@ -5,6 +5,7 @@ import { StoreService } from '../../src/v2/persistence/store.service';
 import { PublicMarketClient } from '../../src/v2/market/public-market.client';
 import { SimulationSettings } from '../../src/v2/market/simulation-settings';
 import { bar } from './fixtures';
+import { v5FifteenHistory } from './btc-v5-fixtures';
 
 jest.mock('ws', () => {
   const { EventEmitter: Emitter } = jest.requireActual<typeof import('events')>('events');
@@ -26,6 +27,33 @@ describe('MarketData reconnection and shutdown', () => {
   afterEach(() => {
     sockets.length = 0;
     jest.useRealTimers();
+  });
+  it('repairs the old 100-bar 5m seed using recovered history before resuming forward catch-up', async () => {
+    const history = v5FifteenHistory()['5m'];
+    const latest = history.at(-1)!;
+    const repo = {
+      findOne: jest.fn(async (q) =>
+        q.where.timeframe === '5m' ? { openTime: latest.openTime } : null,
+      ),
+      countBy: jest.fn().mockResolvedValue(100),
+    };
+    const store = { db: { getRepository: () => repo } } as unknown as StoreService;
+    const candles = jest.fn(async (tf, start, limit) =>
+      tf === '5m' && start === undefined && limit === 320 ? history : [],
+    );
+    const market = new MarketDataService(
+      store,
+      { candles } as unknown as PublicMarketClient,
+      new SimulationSettings(),
+    );
+    const persist = jest.spyOn(market, 'persist').mockResolvedValue(true);
+    await (market as unknown as { recover: () => Promise<void> }).recover();
+    expect(candles).toHaveBeenCalledWith('5m', undefined, 320);
+    expect(candles).toHaveBeenCalledWith('5m', latest.openTime + 300000, 1000);
+    expect(persist).toHaveBeenCalledTimes(320);
+    expect(
+      persist.mock.calls.every(([, recovered, emitRecovered]) => recovered && emitRecovered),
+    ).toBe(true);
   });
   it('ignores partial candles, queues closed ones, reconnects and does not reconnect after shutdown', async () => {
     // Runtime import uses CommonJS constructor; supply the mock in the same shape.
@@ -51,7 +79,7 @@ describe('MarketData reconnection and shutdown', () => {
     market.onModuleInit();
     for (let i = 0; i < 20; i++) await Promise.resolve();
     expect(candles).toHaveBeenNthCalledWith(1, '1h', undefined, 500);
-    expect(candles).toHaveBeenNthCalledWith(2, '5m', undefined, 100);
+    expect(candles).toHaveBeenNthCalledWith(2, '5m', undefined, 320);
     expect(candles).toHaveBeenNthCalledWith(3, '1m', undefined, 100);
     expect(sockets).toHaveLength(1);
     const socket = sockets[0];

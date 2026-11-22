@@ -18,6 +18,9 @@ import { strategyConfiguration, revisionFor } from '../strategy/versions';
 import { validV3Parameters } from '../strategy/btc-v3.strategy';
 import { validV4Parameters } from '../strategy/btc-v4.strategy';
 import { validV5Parameters } from '../strategy/btc-v5.strategy';
+import { shouldPublishSignal } from '../strategy/signal-cadence';
+import { v5RecoverySummary } from '../risk/v5-recovery';
+import { BTC_V5_FIVE_MINUTE_HISTORY } from '../strategy/btc-v5.config';
 
 export interface BacktestOptions {
   strategy: StrategyId;
@@ -71,6 +74,7 @@ export function statistics(s: AccountState, lastPrice: number, equityCurve: numb
       Number(s.account.reserved) + s.positions.reduce((n, p) => n + Number(p.remainingCost), 0),
     totalCommissions: s.fills.reduce((n, f) => n + Number(f.commissionQuote ?? f.commission), 0),
     regimes,
+    v5Recovery: v5RecoverySummary(s),
   };
 }
 /** Incremental aggregation emits only complete UTC-aligned buckets. */
@@ -205,7 +209,8 @@ export class BacktestingEngine {
       if (trading) this.paper.onCandle(state, c, this.strategy.invalidated(history),()=>true,budget);
       for (const bar of [c, ...aggregator.push(c)]) {
         history[bar.timeframe].push(bar);
-        history[bar.timeframe] = history[bar.timeframe].slice(bar.timeframe === '1h' ? -500 : -100);
+        history[bar.timeframe] = history[bar.timeframe].slice(bar.timeframe === '1h' ? -500 :
+          bar.timeframe === '5m' && options.strategy === 'btc-v5' ? -BTC_V5_FIVE_MINUTE_HISTORY : -100);
       }
       const signal = this.strategy.evaluate(history, options.strategy, config);
       if(trading&&options.strategy==='btc-v3'&&this.strategy.lastV3Assessment?.decision==='NO_TRADE'){
@@ -213,7 +218,7 @@ export class BacktestingEngine {
       } else if (trading && (options.strategy === 'btc-v4' || options.strategy === 'btc-v5') && this.strategy.lastAssessment && !this.strategy.lastAssessment.eligible) {
         const reason=this.strategy.lastAssessment.reason;abstentions[reason]=(abstentions[reason]??0)+1;
       }
-      if (signal && !eligible && trading) pending = signal;
+      if (shouldPublishSignal(options.strategy, !!signal, eligible) && trading) pending = signal;
       eligible = !!signal;
       if (trading) {
         equityCurve.push(this.paper.equity(state, c.close).toNumber());
