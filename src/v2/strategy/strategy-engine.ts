@@ -20,7 +20,7 @@ export interface Technical {
 export class StrategyEngine {
   lastV3Assessment?:V3Assessment;
   private readonly btcV3=new BtcV3Strategy(b=>this.technical(b));
-  lastAssessment?: { at:number; eligible:boolean; regime:string; conditions:Record<string,boolean> };
+  lastAssessment?: { at:number; eligible:boolean; regime:string; reason:string; conditions:Record<string,boolean> };
   private readonly closedCache = new WeakMap<Candle, { first:Candle; length:number; value:Technical|null }>();
   evaluate(
     history: MarketHistory,
@@ -29,14 +29,14 @@ export class StrategyEngine {
   ): MarketSignal | null {
     if(strategy==='btc-v3'){
       const a=this.btcV3.assess(history,config);this.lastV3Assessment=a;
-      this.lastAssessment={at:a.at,eligible:a.decision==='BUY',regime:a.conditions.primaryTrend?'up':'other',conditions:a.conditions};
+      this.lastAssessment={at:a.at,eligible:a.decision==='BUY',regime:a.conditions.primaryTrend?'up':'other',reason:a.reason,conditions:a.conditions};
       return a.signal??null;
     }
     this.lastV3Assessment=undefined;
     if(strategy==='trend-reference'){
       const last=history['1m'].at(-1),hourBars=history['1h'].filter(b=>b.closeTime<=(last?.closeTime??0)),hour=this.technical(hourBars.slice(-100)),one=this.technical(history['1m'].slice(-100));
       const eligible=!!last&&!!hour&&!!one&&hour.ema12>hour.ema26&&hourBars.at(-1)!.close>hour.sma21;
-      this.lastAssessment={at:last?.closeTime??0,eligible,regime:eligible?'up':'other',conditions:{primaryTrend:eligible}};
+      this.lastAssessment={at:last?.closeTime??0,eligible,regime:eligible?'up':'other',reason:eligible?'SIGNAL_ELIGIBLE':'NO_PRIMARY_TREND',conditions:{primaryTrend:eligible}};
       if(!eligible)return null;
       return{id:createHash('sha256').update(`trend-reference:${revisionFor(strategy)}:${last.closeTime}`).digest('hex'),strategy,strategyRevision:revisionFor(strategy),symbol:'BTCUSDT',candleTime:last.closeTime,referencePrice:last.close,atr:one!.atr,swingLow:Math.min(...history['1m'].slice(-10).map(b=>b.low)),regime:'up',conditions:{primaryTrend:true},config:{...config}};
     }
@@ -82,13 +82,35 @@ export class StrategyEngine {
         config.takeProfit >
         2 * config.feeRate + (config.spreadBps + 2 * config.slippageBps) / 10000;
       const disabled = new Set(config.disabledConditions || []);
-      eligible = (!config.trendFilter || disabled.has('primaryTrend') || conditions.primaryTrend)
-        && (config.confirmation5m === false || disabled.has('confirmation') || conditions.confirmation)
-        && conditions.costCoverage
-        && ['rsiEntry','macdEntry','candle','volume','structure'].every(key => disabled.has(key) || conditions[key]);
+      const required = [
+        ...(config.trendFilter ? ['primaryTrend'] : []),
+        ...(config.confirmation5m === false ? [] : ['confirmation']),
+        'costCoverage',
+        'rsiEntry',
+        'macdEntry',
+        'candle',
+        'volume',
+        'structure',
+      ].filter((key) => !disabled.has(key));
+      eligible = required.every((key) => conditions[key]);
       regime = conditions.primaryTrend ? 'up' : hour.ema12 < hour.ema26 ? 'down' : 'range';
+      const failed = required.filter((key) => !conditions[key]);
+      this.lastAssessment = {
+        at: last.closeTime,
+        eligible,
+        regime,
+        reason: eligible ? 'SIGNAL_ELIGIBLE' : failed.map((key) => `NO_${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`).join('|'),
+        conditions,
+      };
+    } else {
+      this.lastAssessment = {
+        at: last.closeTime,
+        eligible,
+        regime,
+        reason: eligible ? 'SIGNAL_ELIGIBLE' : 'INSUFFICIENT_LEGACY_CONDITIONS',
+        conditions,
+      };
     }
-    this.lastAssessment = { at:last.closeTime, eligible, regime, conditions };
     if (!eligible) return null;
     const id = createHash('sha256')
       .update(`${strategy}:${STRATEGY_REVISION}:BTCUSDT:${last.closeTime}`)

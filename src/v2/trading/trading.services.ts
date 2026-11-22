@@ -227,8 +227,9 @@ export class StrategyServiceV2 {
       if (candle.closeTime <= row.state.lastCandleTime) return;
       await this.store.once(tx, `strategy:${strategy}`, event.eventId, async () => {
         const risingEdge = !!signal && !row.state.eligible;
+        const assessment = this.engine.lastAssessment;
         row.state = { ...row.state, eligible: !!signal, lastCandleTime: candle.closeTime,
-          lastDecision:this.engine.lastV3Assessment?{decision:this.engine.lastV3Assessment.decision,reason:this.engine.lastV3Assessment.reason,features:this.engine.lastV3Assessment.features}:undefined,
+          lastDecision:this.engine.lastV3Assessment?{decision:this.engine.lastV3Assessment.decision,reason:this.engine.lastV3Assessment.reason,features:this.engine.lastV3Assessment.features}:assessment?{decision:assessment.eligible?'BUY':'NO_TRADE',reason:assessment.reason,features:{regime:assessment.regime,conditions:assessment.conditions}}:undefined,
           configuration: this.settings.config, configurationHash: configurationHash(strategy, revisionFor(strategy), this.settings.config) };
         if (
           risingEdge &&
