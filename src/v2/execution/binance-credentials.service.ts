@@ -43,7 +43,12 @@ export class BinanceCredentialsService {
     } catch {
       throw new ServiceUnavailableException('Binance credential verification is unavailable');
     }
-    if (!response.ok) throw new ConflictException('Binance rejected the API key or secret');
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { code?: unknown; msg?: unknown } | null;
+      const code = typeof body?.code === 'number' ? ` (${body.code})` : '';
+      const message = typeof body?.msg === 'string' ? body.msg.slice(0, 200) : 'API key, secret, permissions, IP restriction or server time';
+      throw new ConflictException(`Binance rejected the connection${code}: ${message}`);
+    }
   }
   private read(row: ExchangeCredentialRow): Credentials {
     return { apiKey: decrypt(row.apiKeyCiphertext), secret: decrypt(row.secretCiphertext), environment: row.environment };
