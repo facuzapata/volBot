@@ -159,6 +159,17 @@ export class PositionManagerService {
         const rate=Math.min(simulationConfig().participationRate,...s.positions.map(p=>p.config.participationRate));
         const budget=await this.store.causalBudget(tx,event.payload.candle.openTime,rate);
         this.paper.onCandle(s, event.payload.candle, this.engine.invalidated(history), () => s.account.entriesEnabled&&owner.active,budget);
+        const v4Closed = s.positions
+          .filter((p) => p.strategy === 'btc-v4' && p.status === 'CLOSED' && (p.closedAt ?? 0) > (s.account.v4StopHaltAt ?? 0))
+          .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0));
+        const v4StopStreak = v4Closed.findIndex((p) => p.exitReason !== 'STOP_LOSS');
+        const consecutiveStops = v4StopStreak === -1 ? v4Closed.length : v4StopStreak;
+        const v4MaxStops = v4Closed[0]?.config.btcV4?.maxConsecutiveStopLosses ?? 3;
+        if (consecutiveStops >= v4MaxStops) {
+          s.account.entriesEnabled = false;
+          // A later manual resume starts a new observed stop sequence.
+          s.account.v4StopHaltAt = event.payload.candle.closeTime;
+        }
           for (const p of s.positions.filter(
             (p) => Number(p.quantity) > 0 && Number(p.stopLoss) <= 0,
           ))
