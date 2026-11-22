@@ -7,10 +7,10 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
-import { DataSource, IsNull } from 'typeorm';
-import { numberEnv, selectedStrategy } from '../config';
+import { DataSource, EntityManager, IsNull } from 'typeorm';
+import { numberEnv, refreshTokenTtlDays, selectedStrategy } from '../config';
 import { AccountState, isOrderOpen, StrategyId } from '../domain/model';
 import { BacktestingEngine, statistics } from '../backtesting/backtesting.engine';
 import { newAccount, PaperExecutionAdapter } from '../execution/paper-execution.adapter';
@@ -25,6 +25,7 @@ import {
   V2User,
   VirtualAccountRow,
   StrategyValidationRow,
+  RefreshTokenRow,
 } from '../persistence/entities';
 import { StoreService } from '../persistence/store.service';
 import { StrategyApprovalService, configurationHash } from '../strategy/approval.service';
@@ -47,6 +48,11 @@ export const publicUser = (u: V2User): PublicUserDto => ({
   role: u.role,
   active: u.active,
 });
+export type AuthSession = {
+  accessToken: string;
+  refreshToken: string;
+  user: PublicUserDto;
+};
 @Injectable()
 export class ApiService {
   private readonly attempts = new Map<string, { count: number; until: number }>();
@@ -62,7 +68,33 @@ export class ApiService {
   get db(): DataSource {
     return this.store.db;
   }
-  async login(email: string, password: string, remote: string) {
+  private accessToken(user: V2User): Promise<string> {
+    return this.jwt.signAsync(
+      { sub: user.id, version: user.tokenVersion },
+      { expiresIn: '15m', issuer: 'volbot-v2', audience: 'volbot-v2-api', algorithm: 'HS256' },
+    );
+  }
+  private tokenHash(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+  private newRefreshToken(id = randomUUID()): { id: string; token: string } {
+    return { id, token: `${id}.${randomBytes(48).toString('base64url')}` };
+  }
+  private async createSession(user: V2User, tx?: EntityManager): Promise<AuthSession> {
+    const refresh = this.newRefreshToken();
+    const repo = (tx ?? this.db.manager).getRepository(RefreshTokenRow);
+    await repo.save({
+      id: refresh.id,
+      userId: user.id,
+      tokenHash: this.tokenHash(refresh.token),
+      tokenVersion: user.tokenVersion,
+      expiresAt: new Date(Date.now() + refreshTokenTtlDays() * 86400000),
+      revokedAt: null,
+      replacedById: null,
+    });
+    return { accessToken: await this.accessToken(user), refreshToken: refresh.token, user: publicUser(user) };
+  }
+  async login(email: string, password: string, remote: string): Promise<AuthSession> {
     // Local rate limit is defense in depth; deploy behind an ingress with a shared limiter.
     const key = remote;
     const entry = this.attempts.get(key);
@@ -82,13 +114,54 @@ export class ApiService {
       .getOne();
     if (!user || !user.active || !(await bcrypt.compare(password, user.passwordHash)))
       throw new UnauthorizedException('Invalid credentials');
-    return {
-      accessToken: await this.jwt.signAsync(
-        { sub: user.id, version: user.tokenVersion },
-        { expiresIn: '15m', issuer: 'volbot-v2', audience: 'volbot-v2-api', algorithm: 'HS256' },
-      ),
-      user: publicUser(user),
-    };
+    return this.createSession(user);
+  }
+  async refresh(rawToken: string): Promise<AuthSession> {
+    const parts = rawToken.split('.');
+    const [id, secret] = parts;
+    if (!id || !secret || parts.length !== 2) throw new UnauthorizedException('Invalid refresh token');
+    return this.db.transaction(async (tx) => {
+      const sessions = tx.getRepository(RefreshTokenRow);
+      const current = await sessions.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      if (!current) throw new UnauthorizedException('Invalid refresh token');
+      const invalid =
+        current.revokedAt ||
+        current.expiresAt.getTime() <= Date.now() ||
+        current.tokenHash !== this.tokenHash(rawToken);
+      if (invalid) {
+        // A reused rotated token invalidates all sessions for this user.
+        await sessions.update({ userId: current.userId, revokedAt: IsNull() }, { revokedAt: new Date() });
+        throw new UnauthorizedException('Refresh token expired or revoked');
+      }
+      const user = await tx.getRepository(V2User).findOneBy({ id: current.userId });
+      if (!user || !user.active || user.tokenVersion !== current.tokenVersion) {
+        await sessions.update(current.id, { revokedAt: new Date() });
+        throw new UnauthorizedException('Session revoked');
+      }
+      const next = this.newRefreshToken();
+      const now = new Date();
+      await sessions.save({
+        id: next.id,
+        userId: user.id,
+        tokenHash: this.tokenHash(next.token),
+        tokenVersion: user.tokenVersion,
+        expiresAt: new Date(Date.now() + refreshTokenTtlDays() * 86400000),
+        revokedAt: null,
+        replacedById: null,
+      });
+      await sessions.update(current.id, { revokedAt: now, replacedById: next.id });
+      return { accessToken: await this.accessToken(user), refreshToken: next.token, user: publicUser(user) };
+    });
+  }
+  async logout(rawToken?: string): Promise<void> {
+    if (!rawToken) return;
+    const parts = rawToken.split('.');
+    const [id, secret] = parts;
+    if (!id || !secret || parts.length !== 2) return;
+    const sessions = this.db.getRepository(RefreshTokenRow);
+    const session = await sessions.findOneBy({ id });
+    if (session && session.tokenHash === this.tokenHash(rawToken) && !session.revokedAt)
+      await sessions.update(id, { revokedAt: new Date() });
   }
   async createUser(body: CreateUserDto) {
     const email = body.email.trim().toLowerCase();

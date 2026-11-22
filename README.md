@@ -96,6 +96,9 @@ V2 lee únicamente `.env.v2`, no el `.env` de V1. Ver [.env.v2.example](.env.v2.
 | V2_DATABASE_URL | Base dedicada `volbot_v2`; no se admite una base V1 |
 | V2_POSTGRES_PASSWORD | Contraseña local PostgreSQL para Compose; usar hex URL-safe |
 | V2_JWT_SECRET | Secreto único de32+ caracteres; sin valor de respaldo |
+| V2_REFRESH_TOKEN_TTL_DAYS | Duración del refresh token rotativo; 7 días por defecto, máximo 30 |
+| V2_COOKIE_SECURE | `true` en HTTPS; `false` sólo para desarrollo local HTTP |
+| V2_CORS_ORIGIN | Origen explícito del frontend local, por ejemplo `http://localhost:5173` |
 | V2_ADMIN_EMAIL / V2_ADMIN_PASSWORD | Creación inicial de administrador; contraseña de12+ caracteres |
 | V2_INITIAL_CAPITAL | Capital virtual inicial;500 por defecto |
 | V2_REDIS_URL | Caché, localhost:16379 fuera de Docker |
@@ -176,11 +179,11 @@ Los reportes incluyen hash de datos, configuración, revisión, trades, fills, l
 
 ## Contrato HTTP
 
-Prefijo `/api`; autenticación Bearer JWT de15 minutos. El usuario activo y la versión del token se verifican en cada petición. Los cuerpos desconocidos se rechazan y las respuestas no incluyen secretos.
+Prefijo `/api`; autenticación Bearer JWT de15 minutos. El usuario activo y la versión del token se verifican en cada petición. `POST /auth/login` y `POST /auth/refresh` devuelven sólo el access token: el refresh token opaco, rotativo y revocable se entrega exclusivamente en una cookie `HttpOnly`, `SameSite=Lax`. `POST /auth/logout` lo revoca. Los cuerpos desconocidos se rechazan y las respuestas no incluyen secretos.
 
 | Área | Rutas principales |
 |---|---|
-| Auth | POST /auth/login; GET /me |
+| Auth | POST /auth/login; POST /auth/refresh; POST /auth/logout; GET /me |
 | Configuración | GET/PATCH /me/config; PATCH /me/entries |
 | Mercado | GET /market/status; GET /market/candles; GET /strategies; GET /signals |
 | Simulación | GET /me/balance, /positions, /orders, /fills, /ledger, /decisions, /stats |
