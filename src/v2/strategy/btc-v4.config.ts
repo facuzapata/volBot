@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 
-export const BTC_V4_REVISION = '2026-11-22.v4.4';
+export const BTC_V4_REVISION = '2026-11-22.v4.5';
 
 export interface BtcV4Parameters {
   revision: string;
@@ -21,6 +21,9 @@ export interface BtcV4Parameters {
   entryHours: number;
   trendEmaFast: number;
   trendEmaSlow: number;
+  setupMaxAgeMinutes: number;
+  entryEmaPeriod: number;
+  entryPullbackMinutes: number;
 }
 
 /** Frozen PAPER candidate. Changes require a new revision and separate replay. */
@@ -43,6 +46,11 @@ export const DEFAULT_BTC_V4: Readonly<BtcV4Parameters> = {
   entryHours: 4,
   trendEmaFast: 20,
   trendEmaSlow: 50,
+  // Four-hour bars establish context. The actual entry is checked on each
+  // closed one-minute candle while this setup remains fresh.
+  setupMaxAgeMinutes: 240,
+  entryEmaPeriod: 9,
+  entryPullbackMinutes: 5,
 };
 
 export const v4ParametersHash = (parameters: BtcV4Parameters): string =>

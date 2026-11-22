@@ -6,7 +6,7 @@ import { Candle } from '../../src/v2/domain/model';
 import { newAccount, PaperExecutionAdapter } from '../../src/v2/execution/paper-execution.adapter';
 import { causalLiquidity } from '../../src/v2/execution/causal-liquidity';
 
-describe('BTC-V4 4h trend/pullback candidate', () => {
+describe('BTC-V4 four-hour context with one-minute entry', () => {
   const end = Date.UTC(2025, 0, 5) - 1;
   const candles = (timeframe: '1m' | '5m' | '1h', step: number, count: number): Candle[] =>
     Array.from({ length: count }, (_, index) => {
@@ -24,7 +24,7 @@ describe('BTC-V4 4h trend/pullback candidate', () => {
     return result;
   };
 
-  it('emits a BUY only for a completed 4h trend pullback recovery', () => {
+  it('emits a BUY when a valid four-hour setup gets a one-minute recovery entry', () => {
     const assessment = new BtcV4Strategy().assess(history(), strategyConfiguration('btc-v4'));
     expect(assessment.decision).toBe('BUY');
     expect(assessment.signal).toMatchObject({ strategy: 'btc-v4', strategyRevision: BTC_V4_REVISION });
@@ -33,10 +33,25 @@ describe('BTC-V4 4h trend/pullback candidate', () => {
     expect(assessment.signal!.protection!.targetPrice).toBeGreaterThan(assessment.signal!.referencePrice);
   });
 
-  it('does not evaluate an incomplete 4h bar', () => {
+  it('checks the one-minute entry after the four-hour context has already closed', () => {
     const data = history();
-    data['1m'][99].closeTime -= 60000;
-    expect(new BtcV4Strategy().assess(data, strategyConfiguration('btc-v4')).reason).toBe('WAITING_FOR_4H_CLOSE');
+    const last = data['1m'][99];
+    last.openTime += 60000;
+    last.closeTime += 60000;
+    const assessment = new BtcV4Strategy().assess(data, strategyConfiguration('btc-v4'));
+    expect(assessment.decision).toBe('BUY');
+    expect(assessment.features!.setupAgeMinutes).toBe(1);
+    expect(assessment.reason).toBe('TREND_PULLBACK_4H_ENTRY_1M');
+  });
+
+  it('does not enter when the one-minute recovery is absent', () => {
+    const data = history();
+    const last = data['1m'][99];
+    last.open = last.close + 5;
+    last.high = last.open + 1;
+    const assessment = new BtcV4Strategy().assess(data, strategyConfiguration('btc-v4'));
+    expect(assessment.decision).toBe('NO_TRADE');
+    expect(assessment.conditions.entryRecovery).toBe(false);
   });
 
   it('keeps its revision and executes its absolute 4h protection', () => {

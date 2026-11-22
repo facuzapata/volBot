@@ -10,7 +10,7 @@ export interface V4Assessment {
   decision: 'BUY' | 'NO_TRADE';
   reason: string;
   conditions: Record<string, boolean>;
-  features?: { atr4h: number; atrFraction: number; emaFast: number; emaSlow: number; stopPrice: number; targetPrice: number; rewardRisk: number };
+  features?: { atr4h: number; atrFraction: number; emaFast: number; emaSlow: number; entryEma: number; setupAgeMinutes: number; stopPrice: number; targetPrice: number; rewardRisk: number };
   signal?: MarketSignal;
 }
 
@@ -45,8 +45,12 @@ const fourHourBars = (bars: Candle[]): Candle[] => {
 };
 
 /**
- * V4.2: long-only 4h trend continuation. It enters a completed bullish 4h
- * pullback that recovers EMA20 and the previous 4h high while EMA20 remains above EMA50.
+ * V4.5: long-only four-hour trend continuation with a one-minute entry.
+ *
+ * Complete four-hour candles decide whether a pullback setup exists. Once it
+ * does, every closed one-minute candle is checked for a fresh pullback and
+ * recovery. This preserves the higher-timeframe context without making the
+ * execution cadence depend on the next four-hour close.
  */
 export class BtcV4Strategy {
   assess(input: MarketHistory, config: SimulationConfig): V4Assessment {
@@ -55,13 +59,12 @@ export class BtcV4Strategy {
     const parameters = { ...DEFAULT_BTC_V4, ...config.btcV4 };
     const no = (reason: string, conditions: Record<string, boolean> = {}, features?: V4Assessment['features']): V4Assessment => ({ at, decision: 'NO_TRADE', reason, conditions, features });
     if (!last) return no('MISSING_CLOSED_DATA');
-    if ((at + 1) % (parameters.entryHours * HOUR) !== 0) return no('WAITING_FOR_4H_CLOSE');
     const source = input['1h'].filter((bar) => bar.closeTime <= at).slice(-500);
     if (source.length < parameters.trendEmaSlow * parameters.entryHours || source.some((bar, index) => index > 0 && bar.openTime !== source[index - 1].openTime + HOUR)) return no('MISSING_OR_UNALIGNED_DATA');
     const bars = fourHourBars(source).slice(-100);
     const current = bars.at(-1);
     const previous = bars.at(-2);
-    if (!current || !previous || current.closeTime !== at || bars.length < parameters.trendEmaSlow) return no('MISSING_OR_UNALIGNED_DATA');
+    if (!current || !previous || bars.length < parameters.trendEmaSlow) return no('MISSING_OR_UNALIGNED_DATA');
     const closes = bars.map((bar) => bar.close);
     const emaFast = indicators.calculateEMA(closes, parameters.trendEmaFast);
     const emaSlow = indicators.calculateEMA(closes, parameters.trendEmaSlow);
@@ -69,21 +72,34 @@ export class BtcV4Strategy {
     const priorEmaSlow = indicators.calculateEMA(closes.slice(0, -1), parameters.trendEmaSlow);
     const atr = indicators.calculateATR(bars, 14);
     if (emaFast === null || emaSlow === null || priorEmaFast === null || priorEmaSlow === null || atr === null || atr <= 0) return no('MISSING_INDICATORS');
-    const stopPrice = current.close - parameters.stopAtr5m * atr;
-    const riskPerUnit = current.close - stopPrice;
+    const entryBars = input['1m'].filter((bar) => bar.closeTime <= at).slice(-100);
+    const entry = entryBars.at(-1);
+    const priorEntry = entryBars.at(-2);
+    if (!entry || !priorEntry || entryBars.length < parameters.entryEmaPeriod + parameters.entryPullbackMinutes + 1)
+      return no('MISSING_ENTRY_DATA');
+    const entryEma = indicators.calculateEMA(entryBars.map((bar) => bar.close), parameters.entryEmaPeriod);
+    if (entryEma === null) return no('MISSING_ENTRY_INDICATORS');
+    const entryPrice = entry.close;
+    const setupAgeMinutes = (at - current.closeTime) / 60000;
+    const stopPrice = entryPrice - parameters.stopAtr5m * atr;
+    const riskPerUnit = entryPrice - stopPrice;
     const marketImpact = (config.spreadBps / 2 + config.slippageBps) / 10000;
-    const entryCostPerUnit = current.close * (1 + marketImpact) * (1 + config.feeRate);
+    const entryCostPerUnit = entryPrice * (1 + marketImpact) * (1 + config.feeRate);
     const stopProceedsPerUnit = stopPrice * (1 - marketImpact) * (1 - config.feeRate);
     const targetPrice = (entryCostPerUnit + parameters.targetRiskMultiple * (entryCostPerUnit - stopProceedsPerUnit)) / (1 - config.feeRate) + 10 * config.tickSize;
+    const pullbackWindow = entryBars.slice(-(parameters.entryPullbackMinutes + 1), -1);
     const conditions: Record<string, boolean> = {
       primaryTrend: emaFast > emaSlow && current.close > emaSlow,
       pullbackRecovery: current.low <= emaFast && current.close > emaFast && current.close > current.open,
       confirmation: previous.low <= priorEmaFast && previous.close > priorEmaFast && previous.close > previous.open && priorEmaFast > priorEmaSlow && current.close > previous.high,
-      volatility: atr / current.close >= parameters.minAtr5mFraction && atr / current.close <= parameters.maxAtr5mFraction,
-      stopGeometry: stopPrice > 0 && stopPrice < current.close && riskPerUnit / current.close <= config.maxStopPercent,
-      rewardRisk: targetPrice > current.close && (targetPrice - current.close) / riskPerUnit >= parameters.targetRiskMultiple,
+      setupFresh: setupAgeMinutes >= 0 && setupAgeMinutes <= parameters.setupMaxAgeMinutes,
+      entryPullback: Math.min(...pullbackWindow.map((bar) => bar.low)) <= entryEma,
+      entryRecovery: entry.close > entry.open && entry.close > priorEntry.high && entry.close > entryEma,
+      volatility: atr / entryPrice >= parameters.minAtr5mFraction && atr / entryPrice <= parameters.maxAtr5mFraction,
+      stopGeometry: stopPrice > 0 && stopPrice < entryPrice && riskPerUnit / entryPrice <= config.maxStopPercent,
+      rewardRisk: targetPrice > entryPrice && (targetPrice - entryPrice) / riskPerUnit >= parameters.targetRiskMultiple,
     };
-    const features = { atr4h: atr, atrFraction: atr / current.close, emaFast, emaSlow, stopPrice, targetPrice, rewardRisk: riskPerUnit > 0 ? (targetPrice - current.close) / riskPerUnit : 0 };
+    const features = { atr4h: atr, atrFraction: atr / entryPrice, emaFast, emaSlow, entryEma, setupAgeMinutes, stopPrice, targetPrice, rewardRisk: riskPerUnit > 0 ? (targetPrice - entryPrice) / riskPerUnit : 0 };
     const failed = Object.keys(conditions).filter((key) => !conditions[key]);
     if (failed.length) return no(failed.map((key) => `NO_${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`).join('|'), conditions, features);
     const id = createHash('sha256').update(`btc-v4:${BTC_V4_REVISION}:BTCUSDT:${at}`).digest('hex');
@@ -93,7 +109,7 @@ export class BtcV4Strategy {
       strategyRevision: BTC_V4_REVISION,
       symbol: 'BTCUSDT',
       candleTime: at,
-      referencePrice: current.close,
+      referencePrice: entryPrice,
       atr,
       swingLow: stopPrice,
       regime: 'up',
@@ -101,7 +117,7 @@ export class BtcV4Strategy {
       config: { ...config, btcV4: parameters },
       protection: { stopPrice: floorStep(stopPrice, config.tickSize).toNumber(), targetPrice: floorStep(targetPrice, config.tickSize).toNumber(), horizonMs: parameters.horizonMinutes * 60000, timeframe: '4h' },
     };
-    return { at, decision: 'BUY', reason: 'TREND_PULLBACK_4H', conditions, features, signal };
+    return { at, decision: 'BUY', reason: 'TREND_PULLBACK_4H_ENTRY_1M', conditions, features, signal };
   }
 }
 
@@ -110,4 +126,7 @@ export const validV4Parameters = (parameters: BtcV4Parameters): boolean =>
   Object.entries(parameters).every(([key, value]) => key === 'revision' || (typeof value === 'number' && Number.isFinite(value) && value >= 0)) &&
   parameters.entryHours === 4 &&
   Number.isInteger(parameters.trendEmaFast) && Number.isInteger(parameters.trendEmaSlow) && parameters.trendEmaFast >= 5 && parameters.trendEmaFast < parameters.trendEmaSlow && parameters.trendEmaSlow <= 100 &&
+  Number.isInteger(parameters.setupMaxAgeMinutes) && parameters.setupMaxAgeMinutes >= 1 && parameters.setupMaxAgeMinutes <= parameters.entryHours * 60 &&
+  Number.isInteger(parameters.entryEmaPeriod) && parameters.entryEmaPeriod >= 3 && parameters.entryEmaPeriod <= 50 &&
+  Number.isInteger(parameters.entryPullbackMinutes) && parameters.entryPullbackMinutes >= 2 && parameters.entryPullbackMinutes <= 30 &&
   parameters.stopAtr5m > 0 && parameters.targetRiskMultiple >= 1.25 && parameters.maxConsecutiveStopLosses >= 1 && Number.isInteger(parameters.maxConsecutiveStopLosses);
