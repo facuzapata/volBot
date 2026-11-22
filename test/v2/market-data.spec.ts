@@ -40,15 +40,19 @@ describe('MarketData reconnection and shutdown', () => {
     const store = {
       db: { createQueryRunner: () => lease, getRepository: () => repo },
     } as unknown as StoreService;
+    const candles = jest.fn().mockResolvedValue([]);
     const client = {
       wsBase: 'wss://example.invalid',
       filters: async () => ({ stepSize: 0.00001, tickSize: 0.01, minQty: 0.00001, minNotional: 5 }),
-      candles: async () => [],
+      candles,
     } as unknown as PublicMarketClient;
     const market = new MarketDataService(store, client, new SimulationSettings());
     const persist = jest.spyOn(market, 'persist').mockResolvedValue(true);
     market.onModuleInit();
     for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(candles).toHaveBeenNthCalledWith(1, '1h', undefined, 500);
+    expect(candles).toHaveBeenNthCalledWith(2, '5m', undefined, 100);
+    expect(candles).toHaveBeenNthCalledWith(3, '1m', undefined, 100);
     expect(sockets).toHaveLength(1);
     const socket = sockets[0];
     socket.emit('open');

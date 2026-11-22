@@ -75,7 +75,12 @@ export class MarketDataService implements OnModuleInit, OnModuleDestroy {
       let pages = 0;
       while (!this.stopped) {
         if (this.stopped) return;
-        const candles = await this.client.candles(tf, start, start === undefined ? 100 : 1000);
+        // V4 derives a 50-EMA from complete 4h bars: it needs at least 200
+        // contiguous 1h candles immediately after a clean database start.
+        // Seed more than that from public market data rather than making the
+        // strategy wait over eight days for a fresh worker to accumulate them.
+        const initialLimit = tf === '1h' ? 500 : 100;
+        const candles = await this.client.candles(tf, start, start === undefined ? initialLimit : 1000);
         for (const c of candles) await this.persist(c, true, !!latest);
         if (!candles.length || candles.length < 1000 || start === undefined) break;
         start = candles[candles.length - 1].openTime + INTERVAL_MS[tf];
