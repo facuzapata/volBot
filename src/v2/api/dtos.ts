@@ -222,9 +222,9 @@ export class CandleDto {
   @ApiProperty({ example: 10 }) @IsNumber() @Min(0) volume!: number;
 }
 export class BacktestDto {
-  @ApiProperty({ enum: ['legacy-v1', 'btc-v2','btc-v3','trend-reference'] }) @IsIn(['legacy-v1', 'btc-v2','btc-v3','trend-reference']) strategy!:
+  @ApiProperty({ enum: ['legacy-v1', 'btc-v2','btc-v3','btc-v4','trend-reference'] }) @IsIn(['legacy-v1', 'btc-v2','btc-v3','btc-v4','trend-reference']) strategy!:
     | 'legacy-v1'
-    | 'btc-v2'|'btc-v3'|'trend-reference';
+    | 'btc-v2'|'btc-v3'|'btc-v4'|'trend-reference';
   @ApiPropertyOptional({type:'object',additionalProperties:true,example:DEFAULT_BTC_V3,description:'Experimental versioned thresholds. Calibration is server-configured and hash verified; clients cannot supply forecasts or approvals.'})
   @IsOptional() @IsObject() @Validate(BtcV3ParametersConstraint) btcV3?:Partial<BtcV3Parameters>;
   @ApiPropertyOptional({example:.005,minimum:.000001,maximum:.1,description:'Maximum estimated net stop loss / marked account equity, revalidated before fill.'})
@@ -270,7 +270,7 @@ export class BacktestResponseDto {
   report!: object;
 }
 export class StrategyResponseDto {
-  @ApiProperty({ enum: ['legacy-v1', 'btc-v2','btc-v3','trend-reference'] }) id!: string;
+  @ApiProperty({ enum: ['legacy-v1', 'btc-v2','btc-v3','btc-v4','trend-reference'] }) id!: string;
   @ApiProperty() revision!: string;
   @ApiProperty() description!: string;
   @ApiProperty() active!: boolean;
@@ -303,7 +303,7 @@ export class MarketStatusDto extends HealthDto {
 export class PositionDto extends RecordDto {
   @ApiProperty() accountId!: string;
   @ApiProperty() signalId!: string;
-  @ApiProperty({ enum: ['legacy-v1', 'btc-v2','btc-v3','trend-reference'] }) strategy!: string;
+  @ApiProperty({ enum: ['legacy-v1', 'btc-v2','btc-v3','btc-v4','trend-reference'] }) strategy!: string;
   @ApiProperty({ enum: ['PAPER', 'LIVE'] }) executionMode!: string;
   @ApiProperty({ description: 'Current remaining BTC, decimal string', example: '0.000300000000' })
   quantity!: string;

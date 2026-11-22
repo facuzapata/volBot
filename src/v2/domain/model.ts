@@ -1,6 +1,7 @@
 export type Timeframe = '1m' | '5m' | '1h';
 import type { BtcV3Parameters, BtcV3Calibration } from '../strategy/btc-v3.config';
-export type StrategyId = 'legacy-v1' | 'btc-v2' | 'btc-v3' | 'trend-reference';
+import type { BtcV4Parameters } from '../strategy/btc-v4.config';
+export type StrategyId = 'legacy-v1' | 'btc-v2' | 'btc-v3' | 'btc-v4' | 'trend-reference';
 export const SIMULATOR_REVISION = 'paper-2026-11-20.causal-2';
 export interface Candle {
   symbol: 'BTCUSDT';
@@ -16,6 +17,8 @@ export interface Candle {
 export interface SimulationConfig {
   btcV3?:BtcV3Parameters;
   btcV3Calibration?:BtcV3Calibration;
+  /** Frozen parameters for the BTC-V4 PAPER candidate. */
+  btcV4?: BtcV4Parameters;
   buyCommissionAsset?: 'USDT' | 'BTC';
   stopModel?: 'STRUCTURE_ATR' | 'ATR_ONLY';
   confirmation5m?: boolean;
@@ -219,6 +222,8 @@ export interface VirtualAccount {
   dayStartEquity: string;
   dayPnl: string;
   lastLiquidityObservation?: LiquidityObservation;
+  /** Timestamp after which BTC-V4 stop exits count toward its next automatic safety halt. */
+  v4StopHaltAt?: number;
 }
 export interface AccountState {
   account: VirtualAccount;

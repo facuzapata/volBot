@@ -46,10 +46,11 @@ export function simulationConfig(): SimulationConfig {
     if(!Object.keys(overrides).every(k=>Object.hasOwn(DEFAULT_BTC_V3,k))||!validV3Parameters(p))throw new Error('INVALID_V3_PARAMETERS');
     return strategyConfiguration('btc-v3',{...c,btcV3:p,maxHoldingMs:p.horizonMinutes*60000,maxRiskPerTrade:process.env.V2_MAX_RISK_PER_TRADE?c.maxRiskPerTrade:.005});
   }
+  if (selectedStrategy() === 'btc-v4') return strategyConfiguration('btc-v4', c);
   return c;
 }
 export function selectedStrategy(): StrategyId {
   const value = process.env.V2_STRATEGY || 'btc-v2';
-  if (value !== 'btc-v2' && value !== 'legacy-v1'&&value!=='btc-v3') throw new Error('Invalid V2_STRATEGY');
+  if (value !== 'btc-v2' && value !== 'legacy-v1' && value !== 'btc-v3' && value !== 'btc-v4') throw new Error('Invalid V2_STRATEGY');
   return value;
 }

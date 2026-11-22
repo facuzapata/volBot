@@ -16,6 +16,7 @@ import { RiskPolicy } from '../risk/risk-policy';
 import { causalLiquidity } from '../execution/causal-liquidity';
 import { strategyConfiguration, revisionFor } from '../strategy/versions';
 import { validV3Parameters } from '../strategy/btc-v3.strategy';
+import { validV4Parameters } from '../strategy/btc-v4.strategy';
 
 export interface BacktestOptions {
   strategy: StrategyId;
@@ -110,7 +111,7 @@ export class BacktestingEngine {
   ) {}
   run(input: Candle[], options: BacktestOptions, tradeStart?: number, tradeEnd?: number) {
     if (
-      !['legacy-v1', 'btc-v2','btc-v3','trend-reference'].includes(options.strategy) ||
+      !['legacy-v1', 'btc-v2','btc-v3','btc-v4','trend-reference'].includes(options.strategy) ||
       !Number.isFinite(options.initialCapital) ||
       options.initialCapital < 10 ||
       !Number.isInteger(options.maxPositions) ||
@@ -135,6 +136,7 @@ export class BacktestingEngine {
       throw new Error('BACKTEST_REQUIRES_CONTIGUOUS_UNIQUE_BTCUSDT_1M');
     const config = strategyConfiguration(options.strategy,options.config);
     if(options.strategy==='btc-v3'&&!validV3Parameters(config.btcV3!))throw new Error('INVALID_BTC_V3_CONFIG');
+    if(options.strategy==='btc-v4'&&!validV4Parameters(config.btcV4!))throw new Error('INVALID_BTC_V4_CONFIG');
     if (
       Object.entries(config).some(
         ([key, value]) =>
@@ -206,6 +208,8 @@ export class BacktestingEngine {
       const signal = this.strategy.evaluate(history, options.strategy, config);
       if(trading&&options.strategy==='btc-v3'&&this.strategy.lastV3Assessment?.decision==='NO_TRADE'){
         const reason=this.strategy.lastV3Assessment.reason;abstentions[reason]=(abstentions[reason]??0)+1;
+      } else if (trading && options.strategy === 'btc-v4' && this.strategy.lastAssessment && !this.strategy.lastAssessment.eligible) {
+        const reason=this.strategy.lastAssessment.reason;abstentions[reason]=(abstentions[reason]??0)+1;
       }
       if (signal && !eligible && trading) pending = signal;
       eligible = !!signal;
