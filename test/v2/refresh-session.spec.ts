@@ -70,6 +70,7 @@ describe('refresh token sessions', () => {
     new BacktestingEngine(),
     {} as StrategyApprovalService,
     {} as SimulationSettings,
+    {} as never,
   );
 
   beforeAll(async () => {

@@ -1,4 +1,4 @@
-# volBot V2 — BTCUSDT, exclusivamente PAPER
+# volBot V2 — BTCUSDT con PAPER predeterminado
 
 ## BTC-V3 experimental y simulador causal
 
@@ -10,7 +10,7 @@ Para un servidor Node configurado explícitamente, `V3_PARAMETERS_JSON` permite 
 
 Las pruebas nuevas están en `test/v2/btc-v3-*.ts`. El backtest HTTP admite `btc-v3`, sus parámetros validados y riesgo máximo; no acepta calibración ni aprobación proporcionadas por clientes. Un reporte de cero operaciones puede registrarse pendiente y no concede aprobación. El journal de la prueba final impide repetirla automáticamente: no borrarlo ni reutilizar marzo para ajustar parámetros conservando la etiqueta fuera de muestra.
 
-Backend NestJS para investigar estrategias sobre datos públicos de Binance, operar con saldos virtuales, persistir resultados y comparar backtests. No promete rentabilidad. Ninguna configuración habilita trading real.
+Backend NestJS para investigar estrategias sobre datos públicos de Binance, operar con saldos virtuales, persistir resultados y comparar backtests. No promete rentabilidad. Cada usuario puede guardar una conexión Binance cifrada y verificada; PAPER sigue siendo el modo predeterminado y las claves productivas requieren una habilitación explícita del servidor.
 
 ## Inicio rápido
 
@@ -20,7 +20,8 @@ Requisitos: Node.js22, npm, Docker Engine/Desktop con Compose y acceso a los hos
 npm.cmd ci --ignore-scripts
 Copy-Item .env.v2.example .env.v2
 # Completar V2_POSTGRES_PASSWORD, V2_DATABASE_URL, V2_JWT_SECRET y V2_ADMIN_PASSWORD.
-# Usar secretos aleatorios únicos; NO agregar API Keys Binance.
+# Generar V2_CREDENTIAL_ENCRYPTION_KEY: $key = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($key); [Convert]::ToBase64String($key)
+# Las API keys se cargan por usuario mediante /api/me/exchange-connection; nunca en el archivo .env.
 docker compose --env-file .env.v2 -f docker-compose.v2.yml up -d --build
 docker compose --env-file .env.v2 -f docker-compose.v2.yml run --rm --no-deps api node dist/v2/cli.js seed
 ```

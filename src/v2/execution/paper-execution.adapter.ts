@@ -420,6 +420,7 @@ export function newAccount(
       available: str(capital),
       reserved: '0',
       entriesEnabled: false,
+      executionMode: 'PAPER',
       maxPositions,
       usdtPerTrade: str(usdtPerTrade),
       lastCandleTime: 0,

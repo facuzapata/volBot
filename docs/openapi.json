@@ -3,7 +3,7 @@
   "paths": {
     "/api/auth/login": {
       "post": {
-        "description": "Iniciar sesión. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Iniciar sesión",
         "operationId": "AuthControllerV2_login",
         "parameters": [],
         "requestBody": {
@@ -49,9 +49,85 @@
         ]
       }
     },
+    "/api/auth/refresh": {
+      "post": {
+        "description": "Refresh session with HttpOnly cookie",
+        "operationId": "AuthControllerV2_refresh",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "summary": "Refresh session with HttpOnly cookie",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "description": "Log out and revoke refresh token",
+        "operationId": "AuthControllerV2_logout",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "summary": "Log out and revoke refresh token",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
     "/api/me": {
       "get": {
-        "description": "Consultar mi perfil público. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar mi perfil público",
         "operationId": "MeControllerV2_profile",
         "parameters": [],
         "responses": {
@@ -94,7 +170,7 @@
     },
     "/api/me/config": {
       "get": {
-        "description": "Consultar mis límites. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar mis límites",
         "operationId": "MeControllerV2_config",
         "parameters": [],
         "responses": {
@@ -135,7 +211,7 @@
         ]
       },
       "patch": {
-        "description": "Cambiar máximo simultáneo y USDT por operación. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Cambiar máximo simultáneo y USDT por operación",
         "operationId": "MeControllerV2_configure",
         "parameters": [],
         "requestBody": {
@@ -188,7 +264,7 @@
     },
     "/api/me/entries": {
       "patch": {
-        "description": "Iniciar o pausar nuevas entradas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Iniciar o pausar nuevas entradas",
         "operationId": "MeControllerV2_entries",
         "parameters": [],
         "requestBody": {
@@ -239,9 +315,156 @@
         ]
       }
     },
+    "/api/me/exchange-connection": {
+      "get": {
+        "description": "Consultar el estado de mi conexión Binance, sin exponer secretos",
+        "operationId": "MeControllerV2_exchangeConnection",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExchangeConnectionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Consultar el estado de mi conexión Binance, sin exponer secretos",
+        "tags": [
+          "Paper account"
+        ]
+      },
+      "put": {
+        "description": "Guardar y verificar una conexión Binance firmada antes de usarla",
+        "operationId": "MeControllerV2_saveExchangeConnection",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinanceCredentialsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExchangeConnectionDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Guardar y verificar una conexión Binance firmada antes de usarla",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
+    "/api/me/trading-mode": {
+      "patch": {
+        "description": "Cambiar entre PAPER y la conexión Binance verificada; el cambio pausa nuevas entradas",
+        "operationId": "MeControllerV2_tradingMode",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradingModeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountConfigResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cambiar entre PAPER y la conexión Binance verificada; el cambio pausa nuevas entradas",
+        "tags": [
+          "Paper account"
+        ]
+      }
+    },
     "/api/me/balance": {
       "get": {
-        "description": "Consultar saldo virtual disponible, reservado e inventario asignado. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar saldo virtual disponible, reservado e inventario asignado",
         "operationId": "MeControllerV2_balance",
         "parameters": [],
         "responses": {
@@ -284,7 +507,7 @@
     },
     "/api/me/positions": {
       "get": {
-        "description": "Consultar posiciones propias, abiertas y cerradas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar posiciones propias, abiertas y cerradas",
         "operationId": "MeControllerV2_positions",
         "parameters": [
           {
@@ -344,7 +567,7 @@
     },
     "/api/me/positions/{id}/close": {
       "post": {
-        "description": "Solicitar cierre simulado en la próxima vela. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Solicitar cierre simulado en la próxima vela",
         "operationId": "MeControllerV2_close",
         "parameters": [
           {
@@ -398,7 +621,7 @@
     },
     "/api/me/orders": {
       "get": {
-        "description": "Consultar historial de órdenes simuladas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar historial de órdenes simuladas",
         "operationId": "MeControllerV2_orders",
         "parameters": [
           {
@@ -458,7 +681,7 @@
     },
     "/api/me/orders/{id}/cancel": {
       "post": {
-        "description": "Cancelar una orden simulada pendiente. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Cancelar una orden simulada pendiente",
         "operationId": "MeControllerV2_cancel",
         "parameters": [
           {
@@ -511,7 +734,7 @@
     },
     "/api/me/fills": {
       "get": {
-        "description": "Consultar ejecuciones y comisiones propias. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar ejecuciones y comisiones propias",
         "operationId": "MeControllerV2_fills",
         "parameters": [
           {
@@ -571,7 +794,7 @@
     },
     "/api/me/ledger": {
       "get": {
-        "description": "Consultar movimientos contables propios. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar movimientos contables propios",
         "operationId": "MeControllerV2_ledger",
         "parameters": [
           {
@@ -631,7 +854,7 @@
     },
     "/api/me/decisions": {
       "get": {
-        "description": "Consultar aceptación o rechazo de señales para mi cuenta. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar aceptación o rechazo de señales para mi cuenta",
         "operationId": "MeControllerV2_decisions",
         "parameters": [
           {
@@ -691,7 +914,7 @@
     },
     "/api/me/stats": {
       "get": {
-        "description": "Consultar P&L neto incluyendo pérdidas y posiciones abiertas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar P&L neto incluyendo pérdidas y posiciones abiertas",
         "operationId": "MeControllerV2_stats",
         "parameters": [],
         "responses": {
@@ -764,7 +987,7 @@
     },
     "/api/market/status": {
       "get": {
-        "description": "BTCUSDT: último precio cerrado, intervalos y estado del sistema. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "BTCUSDT: último precio cerrado, intervalos y estado del sistema",
         "operationId": "MarketControllerV2_status",
         "parameters": [],
         "responses": {
@@ -807,7 +1030,7 @@
     },
     "/api/market/candles": {
       "get": {
-        "description": "Consultar velas cerradas BTCUSDT por temporalidad. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar velas cerradas BTCUSDT por temporalidad",
         "operationId": "MarketControllerV2_candles",
         "parameters": [
           {
@@ -881,7 +1104,7 @@
     },
     "/api/signals": {
       "get": {
-        "description": "Consultar señales de mercado compartidas. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar señales de mercado compartidas",
         "operationId": "MarketControllerV2_signals",
         "parameters": [
           {
@@ -941,7 +1164,7 @@
     },
     "/api/backtests": {
       "post": {
-        "description": "Ejecutar y persistir backtest cronológico BTCUSDT. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Ejecutar y persistir backtest cronológico BTCUSDT",
         "operationId": "BacktestingController_run",
         "parameters": [],
         "requestBody": {
@@ -994,7 +1217,7 @@
     },
     "/api/backtests/{id}": {
       "get": {
-        "description": "Consultar un reporte de backtest propio. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar un reporte de backtest propio",
         "operationId": "BacktestingController_get",
         "parameters": [
           {
@@ -1047,7 +1270,7 @@
     },
     "/api/admin/strategy-validations": {
       "post": {
-        "description": "Registrar evaluación pendiente; nunca habilita por métricas automáticamente. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Registrar evaluación pendiente; nunca habilita por métricas automáticamente",
         "operationId": "AdminControllerV2_registerValidation",
         "parameters": [],
         "requestBody": {
@@ -1098,7 +1321,7 @@
         ]
       },
       "get": {
-        "description": "Consultar aprobaciones y revocaciones persistentes. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar aprobaciones y revocaciones persistentes",
         "operationId": "AdminControllerV2_validations",
         "parameters": [
           {
@@ -1158,7 +1381,7 @@
     },
     "/api/admin/strategy-validations/{id}/decision": {
       "post": {
-        "description": "Aprobar o revocar con revisión humana explícita de versión y configuración. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Aprobar o revocar con revisión humana explícita de versión y configuración",
         "operationId": "AdminControllerV2_decision",
         "parameters": [
           {
@@ -1221,7 +1444,7 @@
     },
     "/api/admin/users": {
       "post": {
-        "description": "Crear usuario y cuenta virtual aislada. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Crear usuario y cuenta virtual aislada",
         "operationId": "AdminControllerV2_create",
         "parameters": [],
         "requestBody": {
@@ -1272,7 +1495,7 @@
         ]
       },
       "get": {
-        "description": "Listar usuarios sin secretos. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Listar usuarios sin secretos",
         "operationId": "AdminControllerV2_users",
         "parameters": [
           {
@@ -1332,7 +1555,7 @@
     },
     "/api/admin/users/{id}/status": {
       "patch": {
-        "description": "Activar o desactivar acceso y nuevas entradas de un usuario. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Activar o desactivar acceso y nuevas entradas de un usuario",
         "operationId": "AdminControllerV2_status",
         "parameters": [
           {
@@ -1395,7 +1618,7 @@
     },
     "/api/admin/users/{id}/notifications": {
       "patch": {
-        "description": "Vincular chat privado Telegram verificado por administrador. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Vincular chat privado Telegram verificado por administrador",
         "operationId": "AdminControllerV2_notifications",
         "parameters": [
           {
@@ -1458,7 +1681,7 @@
     },
     "/api/admin/dead-letters": {
       "get": {
-        "description": "Consultar entregas agotadas sin revelar payloads privados. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Consultar entregas agotadas sin revelar payloads privados",
         "operationId": "AdminControllerV2_dead",
         "parameters": [
           {
@@ -1518,7 +1741,7 @@
     },
     "/api/admin/dead-letters/{id}/replay": {
       "post": {
-        "description": "Reintentar evento conservando su identidad. Simulación exclusivamente; no se envían órdenes a Binance.",
+        "description": "Reintentar evento conservando su identidad",
         "operationId": "AdminControllerV2_replay",
         "parameters": [
           {
@@ -1617,7 +1840,7 @@
     }
   },
   "info": {
-    "title": "VolBot V2 — PAPER ONLY",
+    "title": "VolBot V2",
     "description": "",
     "version": "2.0.0",
     "contact": {}
@@ -1642,8 +1865,7 @@
           },
           "password": {
             "type": "string",
-            "example": "use-a-unique-password",
-            "minLength": 12
+            "example": "existing-password"
           }
         },
         "required": [
@@ -1703,6 +1925,22 @@
           "user"
         ]
       },
+      "RecordDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable, idempotent domain identifier"
+          },
+          "status": {
+            "type": "string",
+            "example": "OPEN"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "AccountConfigResponseDto": {
         "type": "object",
         "properties": {
@@ -1717,12 +1955,21 @@
           "entriesEnabled": {
             "type": "boolean",
             "example": false
+          },
+          "executionMode": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "LIVE"
+            ],
+            "example": "PAPER"
           }
         },
         "required": [
           "maxPositions",
           "usdtPerTrade",
-          "entriesEnabled"
+          "entriesEnabled",
+          "executionMode"
         ]
       },
       "TradingConfigDto": {
@@ -1755,6 +2002,71 @@
           "enabled"
         ]
       },
+      "ExchangeConnectionDto": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "example": true
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "TESTNET",
+              "LIVE"
+            ]
+          },
+          "verifiedAt": {
+            "type": "object",
+            "example": "2026-11-22T00:00:00.000Z"
+          }
+        },
+        "required": [
+          "configured"
+        ]
+      },
+      "BinanceCredentialsDto": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "description": "Binance API key. It is encrypted at rest and never returned."
+          },
+          "secret": {
+            "type": "string",
+            "description": "Binance API secret. It is encrypted at rest and never returned."
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "TESTNET",
+              "LIVE"
+            ],
+            "description": "Use TESTNET before a production key."
+          }
+        },
+        "required": [
+          "apiKey",
+          "secret",
+          "environment"
+        ]
+      },
+      "TradingModeDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "LIVE"
+            ],
+            "description": "LIVE submits to the verified Binance connection for this user."
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
       "BalanceDto": {
         "type": "object",
         "properties": {
@@ -1762,7 +2074,8 @@
             "type": "string",
             "example": "PAPER",
             "enum": [
-              "PAPER"
+              "PAPER",
+              "LIVE"
             ]
           },
           "availableUSDT": {
@@ -2211,22 +2524,6 @@
           "total",
           "limit",
           "offset"
-        ]
-      },
-      "RecordDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Stable, idempotent domain identifier"
-          },
-          "status": {
-            "type": "string",
-            "example": "OPEN"
-          }
-        },
-        "required": [
-          "id"
         ]
       },
       "PageResponseDto": {
@@ -2741,8 +3038,7 @@
           },
           "password": {
             "type": "string",
-            "example": "use-a-unique-password",
-            "minLength": 12
+            "example": "existing-password"
           },
           "name": {
             "type": "string",

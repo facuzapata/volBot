@@ -10,7 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { DataSource, EntityManager, IsNull } from 'typeorm';
-import { numberEnv, refreshTokenTtlDays, selectedStrategy } from '../config';
+import { liveTradingEnabled, numberEnv, refreshTokenTtlDays, selectedStrategy } from '../config';
 import { AccountState, isOrderOpen, StrategyId } from '../domain/model';
 import { BacktestingEngine, statistics } from '../backtesting/backtesting.engine';
 import { newAccount, PaperExecutionAdapter } from '../execution/paper-execution.adapter';
@@ -32,6 +32,7 @@ import { StrategyApprovalService, configurationHash } from '../strategy/approval
 import { strategyConfiguration, revisionFor } from '../strategy/versions';
 import { DEFAULT_BTC_V3 } from '../strategy/btc-v3.config';
 import { SimulationSettings } from '../market/simulation-settings';
+import { BinanceCredentialsService } from '../execution/binance-credentials.service';
 import {
   BacktestDto,
   CreateUserDto,
@@ -64,6 +65,7 @@ export class ApiService {
     private readonly backtester: BacktestingEngine,
     private readonly approvals: StrategyApprovalService,
     private readonly settings:SimulationSettings,
+    private readonly credentials: BinanceCredentialsService,
   ) {}
   get db(): DataSource {
     return this.store.db;
@@ -216,10 +218,44 @@ export class ApiService {
       maxPositions: a.maxPositions,
       usdtPerTrade: a.usdtPerTrade,
       entriesEnabled: a.entriesEnabled,
+      executionMode: a.executionMode ?? 'PAPER',
     };
+  }
+  async exchangeConnection(userId: string) {
+    return this.credentials.status(userId);
+  }
+  async saveExchangeConnection(userId: string, apiKey: string, secret: string, environment: 'TESTNET' | 'LIVE') {
+    return this.credentials.saveAndVerify(userId, apiKey, secret, environment);
+  }
+  async executionMode(userId: string, mode: 'PAPER' | 'LIVE') {
+    const accountId = await this.accountId(userId);
+    if (mode === 'LIVE') {
+      const connection = await this.credentials.verify(userId);
+      if (connection.environment === 'LIVE' && !liveTradingEnabled())
+        throw new ConflictException('Production LIVE trading is disabled by V2_LIVE_TRADING_ENABLED');
+    }
+    await this.store.accountTransaction(accountId, async (s) => {
+      const active = s.positions.some((position) => position.status !== 'CLOSED' && position.status !== 'REJECTED');
+      const pending = s.orders.some((order) => isOrderOpen(order));
+      if ((s.account.executionMode ?? 'PAPER') !== mode && (active || pending))
+        throw new ConflictException('Close or reconcile every open position and order before changing mode');
+      s.account.executionMode = mode;
+      // A mode change is a deliberate safety boundary. The owner explicitly resumes entries afterwards.
+      s.account.entriesEnabled = false;
+    });
+    return this.configuration((await this.state(userId)).account);
   }
   async entries(userId: string, enabled: boolean) {
     const accountId = await this.accountId(userId);
+    const account = (await this.state(userId)).account;
+    if (enabled && account.executionMode === 'LIVE') {
+      const connection = await this.credentials.verify(userId);
+      if (connection.environment === 'LIVE' && !liveTradingEnabled())
+        throw new ConflictException('Production LIVE trading is disabled by V2_LIVE_TRADING_ENABLED');
+      // The current worker is still the deterministic PAPER execution engine. Refuse rather than
+      // labeling simulated fills as exchange trades until the broker order/reconciliation lifecycle is wired.
+      throw new ConflictException('LIVE order execution is not enabled yet; configure and validate on TESTNET first');
+    }
     await this.store.accountTransaction(accountId, async (s, tx) => {
       if (enabled && !await this.approvals.activeApproved(tx, selectedStrategy())) throw new ConflictException('Strategy/configuration has no explicit current approval');
       s.account.entriesEnabled = enabled;
@@ -245,7 +281,7 @@ export class ApiService {
     const s = await this.state(userId);
     const last = await this.latest();
     return {
-      mode: 'PAPER',
+      mode: s.account.executionMode ?? 'PAPER',
       availableUSDT: s.account.available,
       reservedUSDT: s.account.reserved,
       assignedBTC: String(s.positions.reduce((n, p) => n + Number(p.quantity), 0)),

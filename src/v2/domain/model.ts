@@ -206,6 +206,8 @@ export interface VirtualAccount {
   available: string;
   reserved: string;
   entriesEnabled: boolean;
+  /** PAPER uses the deterministic internal simulator; LIVE submits to the owner's Binance account. */
+  executionMode: 'PAPER' | 'LIVE';
   maxPositions: number;
   usdtPerTrade: string;
   lastCandleTime: number;

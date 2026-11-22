@@ -29,6 +29,7 @@ import { ApiService } from './api/api.service';
 import { AuthGuardV2, jwtSecret } from './api/auth';
 import { RiskPolicy } from './risk/risk-policy';
 import { StrategyApprovalService } from './strategy/approval.service';
+import { BinanceCredentialsService } from './execution/binance-credentials.service';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { StrategyApprovalService } from './strategy/approval.service';
     StrategyEngine,
     RiskPolicy,
     StrategyApprovalService,
+    BinanceCredentialsService,
     PublicMarketClient,
     SimulationSettings,
     RedisCacheService,
@@ -68,6 +70,7 @@ import { StrategyApprovalService } from './strategy/approval.service';
     StrategyEngine,
     RiskPolicy,
     StrategyApprovalService,
+    BinanceCredentialsService,
     PublicMarketClient,
     SimulationSettings,
     RedisCacheService,

@@ -15,6 +15,7 @@ import { RedisCacheService } from '../../src/v2/market/redis-cache.service';
 import { BacktestingEngine } from '../../src/v2/backtesting/backtesting.engine';
 import { StrategyApprovalService } from '../../src/v2/strategy/approval.service';
 import { SimulationSettings } from '../../src/v2/market/simulation-settings';
+import { BinanceCredentialsService } from '../../src/v2/execution/binance-credentials.service';
 
 describe('V2 HTTP contract with isolated persistence double', () => {
   let app: INestApplication;
@@ -50,6 +51,7 @@ describe('V2 HTTP contract with isolated persistence double', () => {
         ApiService,
         SimulationSettings,
         { provide: StrategyApprovalService, useValue: { activeApproved: async () => false } },
+        { provide: BinanceCredentialsService, useValue: { status: async () => ({ configured: false }) } },
         PaperExecutionAdapter,
         { provide: BacktestingEngine, useValue: new BacktestingEngine() },
         { provide: DataSource, useValue: db },
@@ -109,7 +111,7 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ maxPositions: 3, usdtPerTrade: 20 })
       .expect(200);
-    expect(response.body).toEqual({ maxPositions: 3, usdtPerTrade: '20', entriesEnabled: false });
+    expect(response.body).toEqual({ maxPositions: 3, usdtPerTrade: '20', entriesEnabled: false, executionMode: 'PAPER' });
   });
   it('does not return secrets and hides another account position', async () => {
     const response = await request(app.getHttpServer())
@@ -137,11 +139,12 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .expect(401);
     user.active = true;
   });
-  it('publishes Swagger JSON and has no live trading route', async () => {
+  it('publishes Swagger JSON without exposing an order-submission route', async () => {
     const response = await request(app.getHttpServer()).get('/api/docs-json').expect(200);
     expect(response.body.paths).toHaveProperty('/api/me/config');
     expect(response.body.paths).toHaveProperty('/api/backtests');
-    expect(JSON.stringify(response.body.paths)).not.toMatch(/binance|\/live\/orders/);
+    expect(response.body.paths).toHaveProperty('/api/me/exchange-connection');
+    expect(JSON.stringify(response.body.paths)).not.toMatch(/\/live\/orders/);
   });
   it('documents BTC-V3 without allowing clients to upload calibration or approval bypasses',async()=>{
     const response=await request(app.getHttpServer()).get('/api/docs-json').expect(200);

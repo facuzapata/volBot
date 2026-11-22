@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -39,8 +40,10 @@ import {
   BacktestDto,
   BacktestResponseDto,
   BalanceDto,
+  BinanceCredentialsDto,
   CreateUserDto,
   EntriesDto,
+  ExchangeConnectionDto,
   HealthDto,
   LoginDto,
   PageDto,
@@ -51,6 +54,7 @@ import {
   StrategyResponseDto,
   TokenDto,
   TradingConfigDto,
+  TradingModeDto,
   CandlesPageDto,
   FillsPageDto,
   LedgerPageDto,
@@ -69,7 +73,7 @@ function Contract(summary: string, response: new () => object, created = false) 
   return applyDecorators(
     ApiOperation({
       summary,
-      description: `${summary}. Simulación exclusivamente; no se envían órdenes a Binance.`,
+      description: summary,
     }),
     created ? ApiCreatedResponse({ type: response }) : ApiOkResponse({ type: response }),
     ApiBadRequestResponse({ description: 'Invalid request or unknown fields' }),
@@ -167,6 +171,22 @@ export class MeControllerV2 {
   @Contract('Iniciar o pausar nuevas entradas', AccountConfigResponseDto)
   entries(@Req() req: AuthRequest, @Body() body: EntriesDto) {
     return this.api.entries(req.user.id, body.enabled);
+  }
+  @Get('exchange-connection')
+  @Contract('Consultar el estado de mi conexión Binance, sin exponer secretos', ExchangeConnectionDto)
+  exchangeConnection(@Req() req: AuthRequest) {
+    return this.api.exchangeConnection(req.user.id);
+  }
+  @Put('exchange-connection')
+  @HttpCode(200)
+  @Contract('Guardar y verificar una conexión Binance firmada antes de usarla', ExchangeConnectionDto)
+  saveExchangeConnection(@Req() req: AuthRequest, @Body() body: BinanceCredentialsDto) {
+    return this.api.saveExchangeConnection(req.user.id, body.apiKey, body.secret, body.environment);
+  }
+  @Patch('trading-mode')
+  @Contract('Cambiar entre PAPER y la conexión Binance verificada; el cambio pausa nuevas entradas', AccountConfigResponseDto)
+  tradingMode(@Req() req: AuthRequest, @Body() body: TradingModeDto) {
+    return this.api.executionMode(req.user.id, body.mode);
   }
   @Get('balance')
   @Contract('Consultar saldo virtual disponible, reservado e inventario asignado', BalanceDto)
