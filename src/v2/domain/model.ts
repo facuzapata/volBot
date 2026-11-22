@@ -128,6 +128,8 @@ export interface OrderIntent {
   createdAt: number;
 }
 export interface ExchangeOrder extends OrderIntent {
+  /** Venue inherited from the position at order creation. */
+  executionMode: 'PAPER' | 'LIVE';
   status: 'PENDING' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELLED' | 'REJECTED' | 'UNKNOWN';
   filledQuantity: string;
   reservedQuote: string;
@@ -170,6 +172,8 @@ export interface Position {
   accountId: string;
   signalId: string;
   strategy: StrategyId;
+  /** Execution venue chosen when this position was opened; never rewritten by later account changes. */
+  executionMode: 'PAPER' | 'LIVE';
   strategyRevision?: string;
   protectionMode?: 'ABSOLUTE'|'REANCHORED';
   plannedStop?: string;
@@ -206,7 +210,7 @@ export interface VirtualAccount {
   available: string;
   reserved: string;
   entriesEnabled: boolean;
-  /** PAPER uses the deterministic internal simulator; LIVE submits to the owner's Binance account. */
+  /** Default venue for new positions. Existing positions retain their own executionMode. */
   executionMode: 'PAPER' | 'LIVE';
   maxPositions: number;
   usdtPerTrade: string;

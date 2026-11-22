@@ -31,7 +31,7 @@ Swagger: http://localhost:3100/api/docs
 
 OpenAPI: http://localhost:3100/api/docs-json ; copia reproducible en [docs/openapi.json](docs/openapi.json).
 
-La cuenta inicial usa `V2_INITIAL_CAPITAL=500`, máximo5 y30 USDT por operación, y nace **pausada**. Iniciar sesión en `POST /api/auth/login` con los valores locales de administrador y usar Authorize en Swagger. Habilitar entradas requiere primero aprobación administrativa explícita de la versión/configuración/evidencia; sin ella la siguiente solicitud devuelve 409. La auditoría actual no justifica concederla. Consultar [auditoría del simulador](docs/simulator-audit.md) y [diagnóstico de estrategia](docs/strategy-diagnostics.md).
+La cuenta inicial usa `V2_INITIAL_CAPITAL=500`, máximo5 y30 USDT por operación, y nace **pausada**. Iniciar sesión en `POST /api/auth/login` con los valores locales de administrador y usar Authorize en Swagger. La estrategia marcada como activa es la que genera las señales operativas; habilitar entradas sólo controla si cada cuenta acepta nuevas oportunidades. La selección posterior de una estrategia o del modo PAPER/LIVE no modifica posiciones ya abiertas.
 
 ```http
 PATCH /api/me/entries

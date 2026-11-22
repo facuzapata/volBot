@@ -269,6 +269,7 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
       signalId: p.signalId,
       side: 'SELL',
       type,
+      executionMode: p.executionMode ?? 'PAPER',
       limitPrice: limitPrice ? str(d(limitPrice).div(p.config.tickSize).ceil().mul(p.config.tickSize)) : undefined,
       quantity: str(floor(p.quantity, p.config.stepSize)),
       filledQuantity: '0',

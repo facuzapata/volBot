@@ -97,7 +97,7 @@ export class CandleRow {
 export class StrategyVersionRow {
   @PrimaryColumn() id!: string;
   @Column() revision!: string;
-  @Column('jsonb') state!: { eligible: boolean; lastCandleTime: number; lastSignalTime: number; configuration?: SimulationConfig; configurationHash?: string; lastDecision?:{decision:string;reason:string;features?:object} };
+  @Column('jsonb') state!: { active?: boolean; eligible: boolean; lastCandleTime: number; lastSignalTime: number; configuration?: SimulationConfig; configurationHash?: string; lastDecision?:{decision:string;reason:string;features?:object} };
 }
 @Entity('v2_outbox')
 @Index(['publishedAt', 'createdAt'])

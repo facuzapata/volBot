@@ -88,9 +88,9 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(403);
   });
-  it('rejects enabling PAPER entries without an explicit strategy approval', async () => {
-    await request(app.getHttpServer()).patch('/api/me/entries').set('Authorization', `Bearer ${token}`).send({ enabled:true }).expect(409);
-    expect(state.account.entriesEnabled).toBe(false);
+  it('enables entries without a separate strategy-approval workflow', async () => {
+    await request(app.getHttpServer()).patch('/api/me/entries').set('Authorization', `Bearer ${token}`).send({ enabled:true }).expect(200);
+    expect(state.account.entriesEnabled).toBe(true);
   });
   it('rejects mass assignment and strategy overrides at the HTTP boundary', async () => {
     await request(app.getHttpServer())
@@ -111,7 +111,7 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ maxPositions: 3, usdtPerTrade: 20 })
       .expect(200);
-    expect(response.body).toEqual({ maxPositions: 3, usdtPerTrade: '20', entriesEnabled: false, executionMode: 'PAPER' });
+    expect(response.body).toEqual({ maxPositions: 3, usdtPerTrade: '20', entriesEnabled: true, executionMode: 'PAPER' });
   });
   it('does not return secrets and hides another account position', async () => {
     const response = await request(app.getHttpServer())

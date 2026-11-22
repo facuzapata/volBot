@@ -24,7 +24,6 @@ import {
   StrategyVersionRow,
   V2User,
   VirtualAccountRow,
-  StrategyValidationRow,
   RefreshTokenRow,
 } from '../persistence/entities';
 import { StoreService } from '../persistence/store.service';
@@ -235,13 +234,7 @@ export class ApiService {
         throw new ConflictException('Production LIVE trading is disabled by V2_LIVE_TRADING_ENABLED');
     }
     await this.store.accountTransaction(accountId, async (s) => {
-      const active = s.positions.some((position) => position.status !== 'CLOSED' && position.status !== 'REJECTED');
-      const pending = s.orders.some((order) => isOrderOpen(order));
-      if ((s.account.executionMode ?? 'PAPER') !== mode && (active || pending))
-        throw new ConflictException('Close or reconcile every open position and order before changing mode');
       s.account.executionMode = mode;
-      // A mode change is a deliberate safety boundary. The owner explicitly resumes entries afterwards.
-      s.account.entriesEnabled = false;
     });
     return this.configuration((await this.state(userId)).account);
   }
@@ -256,8 +249,7 @@ export class ApiService {
       // labeling simulated fills as exchange trades until the broker order/reconciliation lifecycle is wired.
       throw new ConflictException('LIVE order execution is not enabled yet; configure and validate on TESTNET first');
     }
-    await this.store.accountTransaction(accountId, async (s, tx) => {
-      if (enabled && !await this.approvals.activeApproved(tx, selectedStrategy())) throw new ConflictException('Strategy/configuration has no explicit current approval');
+    await this.store.accountTransaction(accountId, async (s) => {
       s.account.entriesEnabled = enabled;
     });
     return this.configuration((await this.state(userId)).account);
@@ -363,10 +355,24 @@ export class ApiService {
     const rows = await this.db.getRepository(StrategyVersionRow).find();
     return Promise.all((['legacy-v1','btc-v2','btc-v3','trend-reference'] as StrategyId[]).map(async id=>{
       const row=rows.find(r=>r.id===id),configuration=row?.state.configuration??strategyConfiguration(id,id==='btc-v3'&&this.settings.btcV3Calibration?{btcV3Calibration:this.settings.btcV3Calibration}:{}),hash=configurationHash(id,revisionFor(id),configuration);
-      const validations=await this.db.getRepository(StrategyValidationRow).find({where:{strategy:id,configHash:hash},order:{createdAt:'DESC'}});
-      return {id,revision:revisionFor(id),active:id===selectedStrategy(),lastEvaluationAt:row?.state.lastCandleTime??0,eligible:row?.state.eligible??false,configuration,configurationHash:hash,calibrationReady:!!configuration.btcV3Calibration,approvalStatus:validations.some(v=>v.status==='APPROVED')?'APPROVED':validations[0]?.status??'UNREGISTERED',lastDecision:row?.state.lastDecision,
+      return {id,revision:revisionFor(id),active:row?.state.active ?? id===selectedStrategy(),lastEvaluationAt:row?.state.lastCandleTime??0,eligible:row?.state.eligible??false,configuration,configurationHash:hash,calibrationReady:!!configuration.btcV3Calibration,lastDecision:row?.state.lastDecision,
         description:id==='btc-v3'?'Experimental: tendencia 1h, retroceso/ATR 5m, recuperación 1m y abstención calibrada.':id==='btc-v2'?'Baseline original: tendencia 1h, confirmación 5m y entrada 1m.':id==='trend-reference'?'Referencia de backtest, sin selección operativa.':'Indicadores originales y puntuación 5/7.'};
     }));
+  }
+  async activateStrategy(id: StrategyId) {
+    if (!['legacy-v1', 'btc-v2', 'btc-v3'].includes(id)) throw new BadRequestException('Strategy cannot be operationally selected');
+    await this.db.transaction(async (tx) => {
+      const rows = await tx.find(StrategyVersionRow);
+      if (!rows.some((row) => row.id === id)) throw new NotFoundException('Strategy not found');
+      for (const row of rows) {
+        const active = row.id === id;
+        if (row.state.active !== active) {
+          row.state = { ...row.state, active };
+          await tx.save(row);
+        }
+      }
+    });
+    return (await this.strategies()).find((strategy) => strategy.id === id)!;
   }
   async candles(query: MarketQueryDto) {
     const [rows, total] = await this.db

@@ -1268,6 +1268,63 @@
         ]
       }
     },
+    "/api/admin/strategies/{id}/active": {
+      "patch": {
+        "description": "Seleccionar la estrategia operativa para señales nuevas; no modifica posiciones existentes",
+        "operationId": "AdminControllerV2_activateStrategy",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "enum": [
+                "legacy-v1",
+                "btc-v2",
+                "btc-v3"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown fields"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked token"
+          },
+          "403": {
+            "description": "Insufficient role"
+          },
+          "404": {
+            "description": "Resource not found in this account"
+          },
+          "409": {
+            "description": "Duplicate resource"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Seleccionar la estrategia operativa para señales nuevas; no modifica posiciones existentes",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
     "/api/admin/strategy-validations": {
       "post": {
         "description": "Registrar evaluación pendiente; nunca habilita por métricas automáticamente",
@@ -2144,6 +2201,13 @@
               "trend-reference"
             ]
           },
+          "executionMode": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "LIVE"
+            ]
+          },
           "quantity": {
             "type": "string",
             "description": "Current remaining BTC, decimal string",
@@ -2203,6 +2267,7 @@
           "accountId",
           "signalId",
           "strategy",
+          "executionMode",
           "quantity",
           "averageEntry",
           "entryQuantity",
@@ -2269,6 +2334,13 @@
               "SELL"
             ]
           },
+          "executionMode": {
+            "type": "string",
+            "enum": [
+              "PAPER",
+              "LIVE"
+            ]
+          },
           "type": {
             "type": "string",
             "enum": [
@@ -2311,6 +2383,7 @@
           "positionId",
           "signalId",
           "side",
+          "executionMode",
           "type",
           "quantity",
           "filledQuantity",
@@ -2634,15 +2707,6 @@
           "eligible": {
             "type": "boolean"
           },
-          "approvalStatus": {
-            "type": "string",
-            "enum": [
-              "APPROVED",
-              "PENDING",
-              "REVOKED",
-              "UNREGISTERED"
-            ]
-          },
           "configuration": {
             "type": "object",
             "additionalProperties": true
@@ -2665,7 +2729,6 @@
           "active",
           "lastEvaluationAt",
           "eligible",
-          "approvalStatus",
           "configuration",
           "configurationHash",
           "calibrationReady"

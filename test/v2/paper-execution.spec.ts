@@ -31,6 +31,8 @@ describe('Paper execution: balances, fees, protection, deterministic fills', () 
     expect(paper.reserve(s, signal(), signal().candleTime).accepted).toBe(true);
     paper.reserve(s, signal(), signal().candleTime);
     expect(s.orders).toHaveLength(1);
+    expect(s.positions[0].executionMode).toBe('PAPER');
+    expect(s.orders[0].executionMode).toBe('PAPER');
     expect(Number(s.account.reserved)).toBe(30);
     expect(paper.reserve(s, signal('s2'), signal().candleTime).reason).toBe('MAX_POSITIONS');
   });

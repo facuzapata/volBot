@@ -292,6 +292,12 @@ export class BacktestingController {
 @Controller('admin')
 export class AdminControllerV2 {
   constructor(private readonly api: ApiService) {}
+  @Patch('strategies/:id/active')
+  @ApiParam({ name: 'id', enum: ['legacy-v1', 'btc-v2', 'btc-v3'] })
+  @Contract('Seleccionar la estrategia operativa para señales nuevas; no modifica posiciones existentes', StrategyResponseDto)
+  activateStrategy(@Param('id') id: 'legacy-v1' | 'btc-v2' | 'btc-v3') {
+    return this.api.activateStrategy(id);
+  }
   @Post('strategy-validations') @Contract('Registrar evaluación pendiente; nunca habilita por métricas automáticamente', RecordDto, true)
   registerValidation(@Req() req: AuthRequest, @Body() body: RegisterValidationDto) { return this.api.registerValidation(body.reportId, req.user.id, body.rationale); }
   @Get('strategy-validations') @Contract('Consultar aprobaciones y revocaciones persistentes', PageResponseDto)

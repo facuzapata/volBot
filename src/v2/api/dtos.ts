@@ -276,7 +276,6 @@ export class StrategyResponseDto {
   @ApiProperty() active!: boolean;
   @ApiProperty({ description: 'Last evaluated closed-candle timestamp in UTC milliseconds' }) lastEvaluationAt!: number;
   @ApiProperty() eligible!: boolean;
-  @ApiProperty({enum:['APPROVED','PENDING','REVOKED','UNREGISTERED']}) approvalStatus!:string;
   @ApiProperty({type:'object',additionalProperties:true}) configuration!:object;
   @ApiProperty() configurationHash!:string;
   @ApiProperty() calibrationReady!:boolean;
@@ -305,6 +304,7 @@ export class PositionDto extends RecordDto {
   @ApiProperty() accountId!: string;
   @ApiProperty() signalId!: string;
   @ApiProperty({ enum: ['legacy-v1', 'btc-v2','btc-v3','trend-reference'] }) strategy!: string;
+  @ApiProperty({ enum: ['PAPER', 'LIVE'] }) executionMode!: string;
   @ApiProperty({ description: 'Current remaining BTC, decimal string', example: '0.000300000000' })
   quantity!: string;
   @ApiProperty() averageEntry!: string;
@@ -327,6 +327,7 @@ export class OrderDto extends RecordDto {
   @ApiProperty() positionId!: string;
   @ApiProperty() signalId!: string;
   @ApiProperty({ enum: ['BUY', 'SELL'] }) side!: string;
+  @ApiProperty({ enum: ['PAPER', 'LIVE'] }) executionMode!: string;
   @ApiProperty({ enum: ['MARKET', 'LIMIT', 'PROTECTION'] }) type!: string;
   @ApiProperty() quantity!: string;
   @ApiProperty() filledQuantity!: string;
