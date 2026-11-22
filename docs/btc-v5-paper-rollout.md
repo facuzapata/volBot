@@ -42,3 +42,9 @@ at +1.392481 USDT on the same basis. Neither meets the existing qualification
 gates. These figures are not a forecast of PAPER or future market performance.
 See [the qualification record](btc-v5-qualification.md) for assumptions,
 limitations, source/configuration hashes and repeatable replay commands.
+
+Publication validation after integrating the current `dev` branch: build,
+typecheck and lint passed; the V2 suite passed 166 tests with 14 skipped.
+The added publication checks reject stale V5 metadata for a new revision,
+preserve current worker snapshots and verify startup after both the V4
+hourly-window repair and V5 five-minute warmup logic are present.

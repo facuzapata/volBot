@@ -127,7 +127,8 @@ describe('MarketData reconnection and shutdown', () => {
       isReleased: false,
     };
     const newestStored = 1735689600000;
-    const repo = { findOne: jest.fn().mockResolvedValue({ openTime: newestStored }) };
+    const repo = { findOne: jest.fn().mockResolvedValue({ openTime: newestStored }),
+      countBy: jest.fn().mockResolvedValue(320) };
     const hourly = bar(newestStored - 499 * 3600000, {
       timeframe: '1h', closeTime: newestStored - 499 * 3600000 + 3599999,
     });
@@ -148,6 +149,7 @@ describe('MarketData reconnection and shutdown', () => {
 
     expect(candles).toHaveBeenCalledWith('1h', undefined, 500);
     expect(persist).toHaveBeenCalledWith(hourly, true, false);
+    expect(market.ready).toBe(true);
     await market.onModuleDestroy();
   });
 });
