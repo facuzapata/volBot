@@ -51,8 +51,8 @@ const aggregate = (bars: Candle[], sourceStep: number, bucketStep: number): Cand
 /**
  * V5 tests a specific hypothesis: failed V4 continuations can be reduced by
  * requiring a healthy 4h trend, a 1h higher-low, a 15m pullback/retest, and a
- * one-minute recovery. A stronger volume-confirmed subset is tagged for a
- * per-account recovery gate after a stop; size never increases after loss.
+ * one-minute recovery and a 15m volume confirmation. The recovery gate after
+ * a stop is retained as defence in depth; size never increases after loss.
  */
 export class BtcV5Strategy {
   assess(input: MarketHistory, config: SimulationConfig): V5Assessment {
@@ -115,7 +115,10 @@ export class BtcV5Strategy {
       recoveryQuality: current15m.volume >= prior15mVolume! * parameters.recoveryVolumeMultiplier && currentHour.close > currentHour.open,
     };
     const features = { atr1h: atr1h!, atrFraction: atr1h! / entryPrice, ema4hFast: ema4hFast!, ema4hSlow: ema4hSlow!, ema1hFast: ema1hFast!, ema15m: ema15m!, entryEma: entryEma!, stopPrice, targetPrice, rewardRisk: riskPerUnit > 0 ? (targetPrice - entryPrice) / riskPerUnit : 0 };
-    const required = Object.keys(conditions).filter((key) => key !== 'recoveryQuality');
+    // V5.2 admits only confirmed breakouts. The 2025 audit showed that the
+    // prior optional-volume entries mostly continued lower after their stop,
+    // so widening stops would hide rather than solve the failed continuation.
+    const required = Object.keys(conditions);
     const failed = required.filter((key) => !conditions[key]);
     if (failed.length) return no(failed.map((key) => `NO_${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`).join('|'), conditions, features);
     const id = createHash('sha256').update(`btc-v5:${BTC_V5_REVISION}:BTCUSDT:${at}`).digest('hex');

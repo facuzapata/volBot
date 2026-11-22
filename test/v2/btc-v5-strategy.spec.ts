@@ -49,6 +49,14 @@ describe('BTC-V5 structure/retest candidate', () => {
     expect(strategyConfiguration('btc-v5').btcV5?.revision).toBe(BTC_V5_REVISION);
   });
 
+  it('rejects a retest whose fifteen-minute volume does not confirm the recovery', () => {
+    const data = history();
+    data['5m'].forEach((bar) => { bar.volume = 100; });
+    const assessment = new BtcV5Strategy().assess(data, strategyConfiguration('btc-v5'));
+    expect(assessment.decision).toBe('NO_TRADE');
+    expect(assessment.reason).toContain('NO_RECOVERY_QUALITY');
+  });
+
   it('requires quality after one stop and cools down after two without increasing ticket size', () => {
     const signal = new BtcV5Strategy().assess(history(), strategyConfiguration('btc-v5')).signal!;
     const state = newAccount('v5', 'v5');

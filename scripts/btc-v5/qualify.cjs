@@ -61,7 +61,7 @@ const qualify = (label, start, end, minTrades) => {
 const result = {
   strategy: 'btc-v5',
   revision: require('../../dist/v2/strategy/btc-v5.config').BTC_V5_REVISION,
-  protocol: 'Fixed V5.1 configuration; recovery gate never raises size; simulator costs use defaults.',
+  protocol: 'Fixed V5 configuration; volume confirmation never changes size; simulator costs use defaults.',
   asOf,
   periods: [
     qualify('development-2024', '2024-01-01', '2025-01-01', 30),

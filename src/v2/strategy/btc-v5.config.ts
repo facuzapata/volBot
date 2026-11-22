@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
  * Frozen V5 research candidate. It replaces neither V4 nor its evidence.
  * Parameters may only change through a new revision and a new replay.
  */
-export const BTC_V5_REVISION = '2026-11-22.v5.1';
+export const BTC_V5_REVISION = '2026-11-22.v5.2';
 
 export interface BtcV5Parameters {
   revision: string;
