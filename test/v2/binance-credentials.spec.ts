@@ -40,7 +40,7 @@ describe('BinanceCredentialsService', () => {
   it('does not replace a valid stored connection when Binance rejects the new one', async () => {
     await service.saveAndVerify('11111111-1111-4111-8111-111111111111', 'key-0123456789abcdef', 'secret-0123456789abcdef', 'TESTNET');
     const saved = rows[0].secretCiphertext;
-    global.fetch = jest.fn(async () => new Response(null, { status: 401 }));
+    global.fetch = jest.fn(async () => new Response(JSON.stringify({ code: -2015, msg: 'Invalid API-key, IP, or permissions for action.' }), { status: 401 }));
     await expect(service.saveAndVerify('11111111-1111-4111-8111-111111111111', 'other-0123456789abcd', 'other-secret-0123456789abcd', 'LIVE')).rejects.toBeInstanceOf(ConflictException);
     expect(rows[0].secretCiphertext).toEqual(saved);
   });
