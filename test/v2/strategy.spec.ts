@@ -55,6 +55,18 @@ describe('Extracted legacy-v1 technical behavior', () => {
     const bars = Array.from({ length: 100 }, (_, i) => bar(1735689600000 + i * 60000));
     expect(new StrategyEngine().evaluate({ '1m': bars, '5m': [], '1h': [] }, 'btc-v2')).toBeNull();
   });
+  it('records the BTC-V2 conditions that prevented a signal', () => {
+    const engine = new StrategyEngine();
+    const oneStart = 1735689600000;
+    const one = Array.from({ length: 100 }, (_, i) => bar(oneStart + i * 60000, { volume: 100 }));
+    const end = one.at(-1)!.closeTime;
+    const five = Array.from({ length: 100 }, (_, i) => ({ ...bar(end - 59999 - (99 - i) * 300000, { volume: 100 }), timeframe: '5m' as const }));
+    const hour = Array.from({ length: 100 }, (_, i) => ({ ...bar(end - 59999 - (99 - i) * 3600000, { volume: 100 }), timeframe: '1h' as const }));
+    expect(engine.evaluate({ '1m': one, '5m': five, '1h': hour }, 'btc-v2')).toBeNull();
+    expect(engine.lastAssessment).toMatchObject({ eligible: false });
+    expect(engine.lastAssessment?.reason).toContain('NO_PRIMARY_TREND');
+    expect(engine.lastAssessment?.conditions).toHaveProperty('volume', false);
+  });
   it('waits for the simultaneous higher-timeframe close rather than using arrival order', () => {
     const hourClose = 1735693199999;
     const minute = bar(hourClose - 59999);

@@ -279,7 +279,7 @@ export class StrategyResponseDto {
   @ApiProperty({type:'object',additionalProperties:true}) configuration!:object;
   @ApiProperty() configurationHash!:string;
   @ApiProperty() calibrationReady!:boolean;
-  @ApiPropertyOptional({type:'object',additionalProperties:true}) lastDecision?:object;
+  @ApiPropertyOptional({type:'object',additionalProperties:true,description:'Latest closed-candle assessment. For BTC-V2, `reason` lists the failed required conditions and `features.conditions` contains each boolean.'}) lastDecision?:object;
 }
 export class MarketQueryDto extends PageDto {
   @ApiPropertyOptional({ enum: ['1m', '5m', '1h'], default: '1m' })

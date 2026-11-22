@@ -2719,7 +2719,8 @@
           },
           "lastDecision": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Latest closed-candle assessment. For BTC-V2, `reason` lists the failed required conditions and `features.conditions` contains each boolean."
           }
         },
         "required": [
