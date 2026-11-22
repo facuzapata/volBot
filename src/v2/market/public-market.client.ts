@@ -31,12 +31,13 @@ export class PublicMarketClient {
     }
     throw last;
   }
-  async candles(timeframe: Timeframe, startTime?: number, limit = 1000): Promise<Candle[]> {
+  async candles(timeframe: Timeframe, startTime?: number, limit = 1000, endTime?: number): Promise<Candle[]> {
     const raw = await this.request('klines', {
       symbol: 'BTCUSDT',
       interval: timeframe,
       limit: String(limit),
       ...(startTime === undefined ? {} : { startTime: String(startTime) }),
+      ...(endTime === undefined ? {} : { endTime: String(endTime) }),
     });
     if (!Array.isArray(raw)) throw new Error('INVALID_PUBLIC_KLINES');
     return raw

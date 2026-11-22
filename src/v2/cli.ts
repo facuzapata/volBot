@@ -59,11 +59,15 @@ async function main(): Promise<void> {
     const client = new PublicMarketClient();
     const candles: Candle[] = [];
     let cursor = Math.ceil(start / 60000) * 60000;
+    let batches = 0;
     while (cursor < end) {
-      const batch = await client.candles('1m', cursor);
+      const batch = await client.candles('1m', cursor, 1000, end - 1);
       if (!batch.length) break;
       candles.push(...batch.filter((c) => c.closeTime < end));
       cursor = batch[batch.length - 1].openTime + 60000;
+      batches++;
+      if (batches % 25 === 0 || cursor >= end)
+        process.stdout.write(`Downloaded ${candles.length} candles through ${new Date(Math.min(cursor, end) - 1).toISOString()}.\n`);
       await new Promise((r) => setTimeout(r, 250));
     }
     await writeFile(arg('output', 'btcusdt-1m.json'), JSON.stringify(candles));
@@ -111,9 +115,10 @@ async function main(): Promise<void> {
     await db.destroy();
   }
 }
-void main().catch(() => {
+void main().catch((error: unknown) => {
+  const detail = error instanceof Error ? error.message : 'UNKNOWN_ERROR';
   process.stderr.write(
-    'V2 command failed. Check documented arguments, configuration and dedicated database availability.\n',
+    `V2 command failed: ${detail}. Check documented arguments, network access, and dedicated database availability.\n`,
   );
   process.exitCode = 1;
 });
