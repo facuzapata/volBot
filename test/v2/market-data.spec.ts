@@ -90,4 +90,36 @@ describe('MarketData reconnection and shutdown', () => {
     expect(sockets).toHaveLength(2);
     expect(lease.query).toHaveBeenCalledWith('SELECT pg_advisory_unlock(72821001)');
   });
+
+  it('repairs the trailing hourly window even when an older deployment already wrote a latest candle', async () => {
+    const lease = {
+      connect: jest.fn(),
+      query: jest.fn().mockResolvedValue([{ acquired: true }]),
+      release: jest.fn().mockResolvedValue(undefined),
+      isReleased: false,
+    };
+    const newestStored = 1735689600000;
+    const repo = { findOne: jest.fn().mockResolvedValue({ openTime: newestStored }) };
+    const hourly = bar(newestStored - 499 * 3600000, {
+      timeframe: '1h', closeTime: newestStored - 499 * 3600000 + 3599999,
+    });
+    const candles = jest.fn((timeframe: string, start?: number, limit?: number) =>
+      Promise.resolve(timeframe === '1h' && start === undefined && limit === 500 ? [hourly] : []),
+    );
+    const store = { db: { createQueryRunner: () => lease, getRepository: () => repo } } as unknown as StoreService;
+    const client = {
+      wsBase: 'wss://example.invalid',
+      filters: async () => ({ stepSize: 0.00001, tickSize: 0.01, minQty: 0.00001, minNotional: 5 }),
+      candles,
+    } as unknown as PublicMarketClient;
+    const market = new MarketDataService(store, client, new SimulationSettings());
+    const persist = jest.spyOn(market, 'persist').mockResolvedValue(true);
+
+    market.onModuleInit();
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+
+    expect(candles).toHaveBeenCalledWith('1h', undefined, 500);
+    expect(persist).toHaveBeenCalledWith(hourly, true, false);
+    await market.onModuleDestroy();
+  });
 });
