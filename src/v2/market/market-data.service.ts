@@ -72,6 +72,17 @@ export class MarketDataService implements OnModuleInit, OnModuleDestroy {
         .getRepository(CandleRow)
         .findOne({ where: { timeframe: tf }, order: { openTime: 'DESC' } });
       let start = latest ? Number(latest.openTime) + INTERVAL_MS[tf] : undefined;
+      // A database can already contain a recent 1h candle yet still lack the
+      // preceding contiguous window V4 needs (200 hours for its 50 4h EMA).
+      // Repair that tail on every worker start. These are recovered candles:
+      // persist them without emitting historical strategy events.
+      if (tf === '1h' && latest) {
+        const historical = await this.client.candles(tf, undefined, 500);
+        for (const candle of historical) await this.persist(candle, true, false);
+        const historicalLast = historical.at(-1);
+        if (historicalLast)
+          start = Math.max(Number(latest.openTime), historicalLast.openTime) + INTERVAL_MS[tf];
+      }
       let pages = 0;
       while (!this.stopped) {
         if (this.stopped) return;
