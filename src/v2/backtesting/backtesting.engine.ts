@@ -203,7 +203,7 @@ export class BacktestingEngine {
       if (trading) this.paper.onCandle(state, c, this.strategy.invalidated(history),()=>true,budget);
       for (const bar of [c, ...aggregator.push(c)]) {
         history[bar.timeframe].push(bar);
-        history[bar.timeframe] = history[bar.timeframe].slice(-100);
+        history[bar.timeframe] = history[bar.timeframe].slice(bar.timeframe === '1h' ? -500 : -100);
       }
       const signal = this.strategy.evaluate(history, options.strategy, config);
       if(trading&&options.strategy==='btc-v3'&&this.strategy.lastV3Assessment?.decision==='NO_TRADE'){

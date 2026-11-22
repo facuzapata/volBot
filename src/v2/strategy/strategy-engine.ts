@@ -21,7 +21,7 @@ export interface Technical {
 export class StrategyEngine {
   lastV3Assessment?:V3Assessment;
   private readonly btcV3=new BtcV3Strategy(b=>this.technical(b));
-  private readonly btcV4=new BtcV4Strategy(b=>this.technical(b));
+  private readonly btcV4=new BtcV4Strategy();
   lastAssessment?: { at:number; eligible:boolean; regime:string; reason:string; conditions:Record<string,boolean>; features?:object };
   private readonly closedCache = new WeakMap<Candle, { first:Candle; length:number; value:Technical|null }>();
   evaluate(

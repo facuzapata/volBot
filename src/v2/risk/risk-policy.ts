@@ -79,6 +79,7 @@ export class RiskPolicy {
     else if (open.some((p) => (!Number.isFinite(Number(p.stopLoss)) || d(p.stopLoss).lte(0)) && d(p.quantity).gt(0)))
       reason = 'UNPROTECTED_POSITION';
     else if (open.length >= s.account.maxPositions) reason = 'MAX_POSITIONS';
+    else if (signal.strategy === 'btc-v4' && open.some((p) => p.strategy === 'btc-v4')) reason = 'MAX_V4_POSITION';
     else if (budget.lte(0) || budget.gt(s.account.available)) reason = 'INSUFFICIENT_BALANCE';
     else if (exposure.plus(budget).gt(equity.mul(c.maxExposure))) reason = 'MAX_EXPOSURE';
     else if (!Number.isFinite(riskDistance)||riskDistance <= 0 || riskDistance > c.maxStopPercent) reason = 'STOP_DISTANCE';

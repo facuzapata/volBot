@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 
-export const BTC_V4_REVISION = '2026-11-22.v4.1';
+export const BTC_V4_REVISION = '2026-11-22.v4.4';
 
 export interface BtcV4Parameters {
   revision: string;
@@ -18,25 +18,31 @@ export interface BtcV4Parameters {
   minAtr5mFraction: number;
   maxAtr5mFraction: number;
   maxConsecutiveStopLosses: number;
+  entryHours: number;
+  trendEmaFast: number;
+  trendEmaSlow: number;
 }
 
 /** Frozen PAPER candidate. Changes require a new revision and separate replay. */
 export const DEFAULT_BTC_V4: Readonly<BtcV4Parameters> = {
   revision: BTC_V4_REVISION,
-  horizonMinutes: 240,
+  horizonMinutes: 7200,
   trendSlopeHours: 3,
   pullbackLookback5m: 12,
   minPullbackAtr: 0.5,
   maxPullbackAtr: 1.8,
   swingLookback5m: 6,
   swingBufferAtr: 0.15,
-  stopAtr5m: 1.5,
-  targetRiskMultiple: 1.8,
+  stopAtr5m: 2,
+  targetRiskMultiple: 3,
   maxRangePosition5m: 0.72,
   maxRangePosition1m: 0.8,
   minAtr5mFraction: 0.001,
-  maxAtr5mFraction: 0.012,
-  maxConsecutiveStopLosses: 3,
+  maxAtr5mFraction: 0.05,
+  maxConsecutiveStopLosses: 20,
+  entryHours: 4,
+  trendEmaFast: 20,
+  trendEmaSlow: 50,
 };
 
 export const v4ParametersHash = (parameters: BtcV4Parameters): string =>

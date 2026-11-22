@@ -208,7 +208,7 @@ export class StrategyServiceV2 {
         .where('c.timeframe = :timeframe', { timeframe })
         .andWhere("(c.data->>'closeTime')::bigint <= :at", { at })
         .orderBy('c.openTime', 'DESC')
-        .take(100)
+        .take(timeframe === '1h' ? 500 : 100)
         .getMany();
       history[timeframe] = rows.reverse().map((x) => x.data);
     }
@@ -235,7 +235,7 @@ export class StrategyServiceV2 {
     // Position supervision always runs, regardless of entry enablement or signal availability.
     await this.positions.candle(event, history);
     const strategy = await this.activeStrategy();
-    const requiredTimeframes = strategy === 'btc-v4' ? ['1m', '5m'] as const : ['1m', '5m', '1h'] as const;
+    const requiredTimeframes = strategy === 'btc-v4' ? ['1m', '1h'] as const : ['1m', '5m', '1h'] as const;
     if ((strategy === 'btc-v2'||strategy==='btc-v3'||strategy==='btc-v4') && !alignedHistory(history, candle.closeTime, requiredTimeframes)) {
       if (event.payload.recovered) return;
       throw new Error('WAITING_FOR_ALIGNED_CLOSED_TIMEFRAMES');
