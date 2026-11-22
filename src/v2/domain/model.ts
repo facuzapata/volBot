@@ -1,7 +1,8 @@
 export type Timeframe = '1m' | '5m' | '1h';
 import type { BtcV3Parameters, BtcV3Calibration } from '../strategy/btc-v3.config';
 import type { BtcV4Parameters } from '../strategy/btc-v4.config';
-export type StrategyId = 'legacy-v1' | 'btc-v2' | 'btc-v3' | 'btc-v4' | 'trend-reference';
+import type { BtcV5Parameters } from '../strategy/btc-v5.config';
+export type StrategyId = 'legacy-v1' | 'btc-v2' | 'btc-v3' | 'btc-v4' | 'btc-v5' | 'trend-reference';
 export const SIMULATOR_REVISION = 'paper-2026-11-20.causal-2';
 export interface Candle {
   symbol: 'BTCUSDT';
@@ -19,6 +20,8 @@ export interface SimulationConfig {
   btcV3Calibration?:BtcV3Calibration;
   /** Frozen parameters for the BTC-V4 PAPER candidate. */
   btcV4?: BtcV4Parameters;
+  /** Frozen parameters for the BTC-V5 structure/retest candidate. */
+  btcV5?: BtcV5Parameters;
   buyCommissionAsset?: 'USDT' | 'BTC';
   stopModel?: 'STRUCTURE_ATR' | 'ATR_ONLY';
   confirmation5m?: boolean;
@@ -224,6 +227,9 @@ export interface VirtualAccount {
   lastLiquidityObservation?: LiquidityObservation;
   /** Timestamp after which BTC-V4 stop exits count toward its next automatic safety halt. */
   v4StopHaltAt?: number;
+  /** V5 pauses after a stop-loss streak; it never increases the next order size. */
+  v5RecoveryBlockedUntil?: number;
+  v5RecoveryResetAt?: number;
 }
 export interface AccountState {
   account: VirtualAccount;

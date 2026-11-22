@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import * as indicators from '../../utils/indicators';
 import { BtcV3Strategy, V3Assessment } from './btc-v3.strategy';
 import { BtcV4Strategy } from './btc-v4.strategy';
+import { BtcV5Strategy } from './btc-v5.strategy';
 import { revisionFor } from './versions';
 import {
   Candle,
@@ -22,6 +23,7 @@ export class StrategyEngine {
   lastV3Assessment?:V3Assessment;
   private readonly btcV3=new BtcV3Strategy(b=>this.technical(b));
   private readonly btcV4=new BtcV4Strategy();
+  private readonly btcV5=new BtcV5Strategy();
   lastAssessment?: { at:number; eligible:boolean; regime:string; reason:string; conditions:Record<string,boolean>; features?:object };
   private readonly closedCache = new WeakMap<Candle, { first:Candle; length:number; value:Technical|null }>();
   evaluate(
@@ -38,6 +40,12 @@ export class StrategyEngine {
       this.lastV3Assessment=undefined;
       const a=this.btcV4.assess(history,config);
       this.lastAssessment={at:a.at,eligible:a.decision==='BUY',regime:a.conditions.primaryTrend?'up':'other',reason:a.reason,conditions:a.conditions,features:a.features};
+      return a.signal??null;
+    }
+    if(strategy==='btc-v5'){
+      this.lastV3Assessment=undefined;
+      const a=this.btcV5.assess(history,config);
+      this.lastAssessment={at:a.at,eligible:a.decision==='BUY',regime:a.conditions.trend4h?'up':'other',reason:a.reason,conditions:a.conditions,features:a.features};
       return a.signal??null;
     }
     this.lastV3Assessment=undefined;

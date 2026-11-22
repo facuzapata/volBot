@@ -219,7 +219,7 @@ export class StrategyServiceV2 {
   private async activeStrategy(): Promise<ReturnType<typeof selectedStrategy>> {
     const rows = await this.store.db.getRepository(StrategyVersionRow).find();
     const active = rows.find((row) => row.state.active)?.id;
-    if (active === 'legacy-v1' || active === 'btc-v2' || active === 'btc-v3' || active === 'btc-v4') return active;
+    if (active === 'legacy-v1' || active === 'btc-v2' || active === 'btc-v3' || active === 'btc-v4' || active === 'btc-v5') return active;
     return selectedStrategy();
   }
   private configurationFor(strategy: ReturnType<typeof selectedStrategy>) {
@@ -236,7 +236,7 @@ export class StrategyServiceV2 {
     await this.positions.candle(event, history);
     const strategy = await this.activeStrategy();
     const requiredTimeframes = strategy === 'btc-v4' ? ['1m', '1h'] as const : ['1m', '5m', '1h'] as const;
-    if ((strategy === 'btc-v2'||strategy==='btc-v3'||strategy==='btc-v4') && !alignedHistory(history, candle.closeTime, requiredTimeframes)) {
+    if ((strategy === 'btc-v2'||strategy==='btc-v3'||strategy==='btc-v4'||strategy==='btc-v5') && !alignedHistory(history, candle.closeTime, requiredTimeframes)) {
       if (event.payload.recovered) return;
       throw new Error('WAITING_FOR_ALIGNED_CLOSED_TIMEFRAMES');
     }

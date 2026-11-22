@@ -24,6 +24,7 @@ export function assessExecutionRisk(s:AccountState,p:Position,reference:number,p
   else if(p.protectionMode==='ABSOLUTE'&&(!Number.isFinite(Number(p.plannedTarget))||new Decimal(p.plannedTarget!).lte(price)))reason='TARGET_NOT_ABOVE_EXECUTED';
   else if(p.strategy==='btc-v3'&&targetPnl.lte(cost.mul(c.btcV3?.economicMargin??.0005)))reason='TARGET_NOT_ECONOMIC';
   else if(p.strategy==='btc-v4'&&targetPnl.lte(loss.mul(c.btcV4?.targetRiskMultiple??1.8)))reason='TARGET_REWARD_RISK';
+  else if(p.strategy==='btc-v5'&&targetPnl.lte(loss.mul(c.btcV5?.targetRiskMultiple??2)))reason='TARGET_REWARD_RISK';
   else if(p.stopDistance>c.maxStopPercent||price.minus(stop).div(price).gt(c.maxStopPercent))reason='EXECUTION_STOP_DISTANCE';
   else if(!Number.isFinite(c.maxRiskPerTrade)||c.maxRiskPerTrade<=0||loss.gt(maxLoss))reason='EXECUTION_TRADE_RISK';
   else if(exposure.gt(equity.mul(c.maxExposure)))reason='EXECUTION_MAX_EXPOSURE';

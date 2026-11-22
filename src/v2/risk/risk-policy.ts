@@ -50,7 +50,7 @@ export class RiskPolicy {
     // V4 uses the configured ticket as a ceiling, never as permission to exceed the
     // account-level loss cap implied by its structural stop.
     const riskCostFraction = riskDistance + 2 * c.feeRate + (c.spreadBps + 2 * c.slippageBps) / 10000;
-    const budget = signal.strategy === 'btc-v4' && riskCostFraction > 0
+    const budget = (signal.strategy === 'btc-v4' || signal.strategy === 'btc-v5') && riskCostFraction > 0
       ? Decimal.min(configuredBudget, equity.mul(c.maxRiskPerTrade).div(riskCostFraction))
       : configuredBudget;
     const exposure = open.reduce(
@@ -65,6 +65,22 @@ export class RiskPolicy {
       ? s.positions.filter((p) => p.strategy === 'btc-v4' && p.status === 'CLOSED').length
       : consecutiveV4Stops;
     const v4Halted = signal.strategy === 'btc-v4' && v4StopStreak >= (c.btcV4?.maxConsecutiveStopLosses ?? 3);
+    let v5StopStreak = 0;
+    let latestV5Exit: Position | undefined;
+    if (signal.strategy === 'btc-v5') {
+      if (s.account.v5RecoveryBlockedUntil && at >= s.account.v5RecoveryBlockedUntil) {
+        // A completed 4h cooldown starts a new observed streak. It never
+        // changes ticket size or attempts to recover the prior loss.
+        s.account.v5RecoveryResetAt = at;
+        s.account.v5RecoveryBlockedUntil = undefined;
+      }
+      const v5Closed = s.positions
+        .filter((p) => p.strategy === 'btc-v5' && p.status === 'CLOSED' && (p.closedAt ?? 0) > (s.account.v5RecoveryResetAt ?? 0))
+        .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0));
+      latestV5Exit = v5Closed[0];
+      const firstNonStop = v5Closed.findIndex((p) => p.exitReason !== 'STOP_LOSS');
+      v5StopStreak = firstNonStop === -1 ? v5Closed.length : firstNonStop;
+    }
     let reason = 'ACCEPTED';
     if (v4Halted) {
       s.account.entriesEnabled = false;
@@ -73,6 +89,15 @@ export class RiskPolicy {
       s.account.v4StopHaltAt = at;
       reason = 'CONSECUTIVE_STOP_LOSS_HALT';
     }
+    else if (signal.strategy === 'btc-v5' && s.account.v5RecoveryBlockedUntil && at < s.account.v5RecoveryBlockedUntil)
+      reason = 'V5_CONSECUTIVE_STOP_COOLDOWN';
+    else if (signal.strategy === 'btc-v5' && v5StopStreak >= (c.btcV5?.maxConsecutiveStopLosses ?? 2)) {
+      const fourHours = 4 * 60 * 60 * 1000;
+      s.account.v5RecoveryBlockedUntil = Math.floor((at + 1) / fourHours) * fourHours + fourHours - 1;
+      reason = 'V5_CONSECUTIVE_STOP_COOLDOWN';
+    }
+    else if (signal.strategy === 'btc-v5' && latestV5Exit?.exitReason === 'STOP_LOSS' && !signal.conditions.recoveryQuality)
+      reason = 'V5_RECOVERY_QUALITY_REQUIRED';
     else if (!s.account.entriesEnabled) reason = 'ENTRIES_PAUSED';
     else if (at - signal.candleTime > c.signalMaxAgeMs || at < signal.candleTime)
       reason = 'STALE_SIGNAL';
@@ -80,6 +105,7 @@ export class RiskPolicy {
       reason = 'UNPROTECTED_POSITION';
     else if (open.length >= s.account.maxPositions) reason = 'MAX_POSITIONS';
     else if (signal.strategy === 'btc-v4' && open.some((p) => p.strategy === 'btc-v4')) reason = 'MAX_V4_POSITION';
+    else if (signal.strategy === 'btc-v5' && open.some((p) => p.strategy === 'btc-v5')) reason = 'MAX_V5_POSITION';
     else if (budget.lte(0) || budget.gt(s.account.available)) reason = 'INSUFFICIENT_BALANCE';
     else if (exposure.plus(budget).gt(equity.mul(c.maxExposure))) reason = 'MAX_EXPOSURE';
     else if (!Number.isFinite(riskDistance)||riskDistance <= 0 || riskDistance > c.maxStopPercent) reason = 'STOP_DISTANCE';

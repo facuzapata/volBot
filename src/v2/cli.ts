@@ -31,7 +31,7 @@ async function main(): Promise<void> {
       },
     };
     if (
-      !['legacy-v1', 'btc-v2','btc-v3','btc-v4','trend-reference'].includes(options.strategy) ||
+      !['legacy-v1', 'btc-v2','btc-v3','btc-v4','btc-v5','trend-reference'].includes(options.strategy) ||
       options.initialCapital < 10 ||
       options.usdtPerTrade < 5 ||
       options.maxPositions < 1 ||
