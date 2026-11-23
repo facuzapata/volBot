@@ -371,7 +371,15 @@ export class ApiService {
     if (!['legacy-v1', 'btc-v2', 'btc-v3', 'btc-v4', 'btc-v5', 'btc-v6'].includes(id)) throw new BadRequestException('Strategy cannot be operationally selected');
     await this.db.transaction(async (tx) => {
       const rows = await tx.find(StrategyVersionRow);
-      if (!rows.some((row) => row.id === id)) throw new NotFoundException('Strategy not found');
+      if (!rows.some((row) => row.id === id)) {
+        const row = {
+          id,
+          revision: revisionFor(id),
+          state: { active: false, eligible: false, lastCandleTime: 0, lastSignalTime: 0 },
+        } as StrategyVersionRow;
+        await tx.save(row);
+        rows.push(row);
+      }
       for (const row of rows) {
         const active = row.id === id;
         if (row.state.active !== active) {

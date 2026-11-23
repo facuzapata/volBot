@@ -73,4 +73,31 @@ describe('strategy activation', () => {
       ['btc-v3', true],
     ]);
   });
+
+  it('idempotently registers a known V6 row when deployment missed the data migration', async () => {
+    const rows = [
+      { id: 'btc-v5', revision: BTC_V5_REVISION,
+        state: { active: true, eligible: false, lastCandleTime: 0, lastSignalTime: 0 } },
+    ];
+    const db = {
+      getRepository: () => ({ find: async () => rows }),
+      transaction: async <T>(action: (tx: {
+        find: (entity: unknown) => Promise<typeof rows>;
+        save: (row: (typeof rows)[number]) => Promise<void>;
+      }) => Promise<T>) => action({ find: async () => rows, save: async () => undefined }),
+    };
+    const service = new ApiService(
+      { db } as unknown as StoreService, {} as never, new PaperExecutionAdapter(),
+      { ready: true } as RedisCacheService, new BacktestingEngine(),
+      {} as StrategyApprovalService, {} as SimulationSettings, {} as never,
+    );
+
+    const active = await service.activateStrategy('btc-v6');
+
+    expect(active).toMatchObject({ id: 'btc-v6', active: true });
+    expect(rows.map((row) => [row.id, row.state.active])).toEqual([
+      ['btc-v5', false],
+      ['btc-v6', true],
+    ]);
+  });
 });
