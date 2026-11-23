@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 
-export const BTC_V6_REVISION = '2026-11-23.v6.1';
+export const BTC_V6_REVISION = '2026-11-23.v6.3';
 
 export interface BtcV6Parameters {
   revision: string;
@@ -9,7 +9,6 @@ export interface BtcV6Parameters {
   minNetTargetFraction: number;
   trendEmaFast: number;
   trendEmaSlow: number;
-  minTrendStrength: number;
   resistanceMinutes: number;
   breakoutAtr: number;
   maxBreakoutAtr: number;
@@ -26,11 +25,10 @@ export const DEFAULT_BTC_V6: Readonly<BtcV6Parameters> = {
   minNetTargetFraction: 0.001,
   trendEmaFast: 9,
   trendEmaSlow: 21,
-  minTrendStrength: 0.0002,
-  resistanceMinutes: 45,
-  breakoutAtr: 0.5,
+  resistanceMinutes: 20,
+  breakoutAtr: 0.2,
   maxBreakoutAtr: 2.5,
-  minImpulseAtr: 1,
+  minImpulseAtr: 0.5,
   minVolumeMultiple: 1.5,
   minAtrFraction: 0.0002,
   maxAtrFraction: 0.012,

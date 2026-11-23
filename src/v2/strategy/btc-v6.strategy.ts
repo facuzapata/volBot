@@ -29,9 +29,12 @@ export class BtcV6Strategy {
     const fives = history['5m'].filter((bar) => bar.closeTime < currentFiveOpen).slice(-100);
     if (minutes.length < p.resistanceMinutes + 1 || fives.length < 50) return no('MISSING_DATA');
     const atr = indicators.calculateATR(fives, 14);
-    const fast = indicators.calculateEMA(fives.map((bar) => bar.close), p.trendEmaFast);
-    const slow = indicators.calculateEMA(fives.map((bar) => bar.close), p.trendEmaSlow);
-    if (atr === null || fast === null || slow === null) return no('MISSING_INDICATORS');
+    const fiveCloses = fives.map((bar) => bar.close);
+    const fast = indicators.calculateEMA(fiveCloses, p.trendEmaFast);
+    // Use the same EMA seed for both values, excluding the latest completed 5m bar.
+    const previousFast = indicators.calculateEMA(fiveCloses.slice(0, -1), p.trendEmaFast);
+    const slow = indicators.calculateEMA(fiveCloses, p.trendEmaSlow);
+    if (atr === null || fast === null || previousFast === null || slow === null) return no('MISSING_INDICATORS');
     const previous = minutes.at(-2)!;
     const resistance = Math.max(...minutes.slice(-(p.resistanceMinutes + 1), -1).map((bar) => bar.high));
     const averageVolume = minutes.slice(-21, -1).reduce((sum, bar) => sum + bar.volume, 0) / 20;
@@ -45,7 +48,7 @@ export class BtcV6Strategy {
       (targetPrice * (1 - impact) * (1 - config.feeRate) - last.close * (1 + impact) * (1 + config.feeRate)) /
       last.close;
     const conditions: Record<string, boolean> = {
-      fastTrend: fast > slow && trendStrength >= p.minTrendStrength,
+      fastTrend: fast > previousFast,
       shortBreakout: previous.close <= resistance &&
         last.close >= resistance + p.breakoutAtr * atr &&
         breakoutDistanceAtr <= p.maxBreakoutAtr,
@@ -59,7 +62,8 @@ export class BtcV6Strategy {
     const failed = Object.keys(conditions).filter((key) => !conditions[key]);
     const features = {
       model: 'CRYPTO_MOMENTUM_BREAKOUT', atr5m: atr, atrFraction: atr / last.close,
-      ema5mFast: fast, ema5mSlow: slow, trendStrength, resistancePrice: resistance,
+      ema5mFast: fast, ema5mFastPrevious: previousFast, ema5mFastSlope: fast / previousFast - 1,
+      ema5mSlow: slow, trendStrength, resistancePrice: resistance,
       breakoutDistanceAtr, impulseAtr, volumeMultiple, targetPrice, netTargetFraction,
     };
     if (failed.length)
