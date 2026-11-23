@@ -4,6 +4,7 @@ import { BtcV3Strategy, V3Assessment } from './btc-v3.strategy';
 import { BtcV4Strategy } from './btc-v4.strategy';
 import { BtcV5JumpStrategy } from './btc-v5-jump.strategy';
 import { BtcV5Strategy } from './btc-v5.strategy';
+import { BtcV6Strategy } from './btc-v6.strategy';
 import { revisionFor } from './versions';
 import {
   Candle,
@@ -26,6 +27,7 @@ export class StrategyEngine {
   private readonly btcV4=new BtcV4Strategy();
   private readonly btcV5=new BtcV5JumpStrategy();
   private readonly protectedBtcV5=new BtcV5Strategy();
+  private readonly btcV6=new BtcV6Strategy();
   lastAssessment?: { at:number; eligible:boolean; regime:string; reason:string; conditions:Record<string,boolean>; features?:object };
   private readonly closedCache = new WeakMap<Candle, { first:Candle; length:number; value:Technical|null }>();
   evaluate(
@@ -50,6 +52,12 @@ export class StrategyEngine {
         ? this.protectedBtcV5.assess(history,config)
         : this.btcV5.assess(history,config);
       this.lastAssessment={at:a.at,eligible:a.decision==='BUY',regime:(a.conditions.trendMomentum||a.conditions.trend15m||a.conditions.trend1h)?'up':'other',reason:a.reason,conditions:a.conditions,features:a.features};
+      return a.signal??null;
+    }
+    if(strategy==='btc-v6'){
+      this.lastV3Assessment=undefined;
+      const a=this.btcV6.assess(history,config);
+      this.lastAssessment={at:a.at,eligible:a.decision==='BUY',regime:a.conditions.fastTrend?'up':'other',reason:a.reason,conditions:a.conditions,features:a.features};
       return a.signal??null;
     }
     this.lastV3Assessment=undefined;

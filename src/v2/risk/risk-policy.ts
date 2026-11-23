@@ -22,14 +22,17 @@ export class RiskPolicy {
     const existing = s.decisions.find((x) => x.id === decisionId);
     if (existing) return { accepted: existing.accepted, reason: existing.reason };
     const c = signal.config;
-    const targetOnly = signal.strategy === 'btc-v5' && signal.protection?.exitMode === 'TARGET_ONLY' &&
-      c.btcV5?.exitMode === 'TARGET_ONLY' && (s.account.executionMode ?? 'PAPER') === 'PAPER';
+    const targetOnly = signal.protection?.exitMode === 'TARGET_ONLY' &&
+      ((signal.strategy === 'btc-v5' && c.btcV5?.exitMode === 'TARGET_ONLY') ||
+        (signal.strategy === 'btc-v6' && c.btcV6?.exitMode === 'TARGET_ONLY')) &&
+      (s.account.executionMode ?? 'PAPER') === 'PAPER';
     const confirmedJump =
       c.btcV5?.entryModel === 'CONFIRMED_JUMP' &&
       signal.conditions.exceptionalImpulse === true &&
       signal.conditions.continuationConfirmation === true;
     if (((signal.protection?.exitMode === 'TARGET_ONLY' ||
-      (signal.strategy === 'btc-v5' && c.btcV5?.exitMode === 'TARGET_ONLY')) && !targetOnly) ||
+      (signal.strategy === 'btc-v5' && c.btcV5?.exitMode === 'TARGET_ONLY') ||
+      (signal.strategy === 'btc-v6' && c.btcV6?.exitMode === 'TARGET_ONLY')) && !targetOnly) ||
       (targetOnly && (signal.protection!.stopPrice !== 0 || signal.protection!.horizonMs !== 0))) {
       const reason = 'INVALID_EXIT_MODE';
       s.decisions.push({ id: decisionId, accountId: s.account.id, signalId: signal.id, accepted: false, reason, at });
@@ -155,7 +158,8 @@ export class RiskPolicy {
     else if (!targetOnly && (!Number.isFinite(riskDistance)||riskDistance <= 0 || riskDistance > c.maxStopPercent)) reason = 'STOP_DISTANCE';
     else if(
       open.some((p) => Number(p.quantity) > 0 && signal.referencePrice < Number(p.averageEntry)) &&
-      !(signal.strategy === 'btc-v5' && targetOnly && allowIndependentLowerV5Entry)
+      !((signal.strategy === 'btc-v5' && targetOnly && allowIndependentLowerV5Entry) ||
+        (signal.strategy === 'btc-v6' && targetOnly))
     )
       reason = 'AVERAGING_DOWN_BLOCKED';
     else if (

@@ -11,6 +11,7 @@ const {
 } = require('../../dist/v2/strategy/btc-v5-jump.strategy');
 const { strategyConfiguration } = require('../../dist/v2/strategy/versions');
 const { BTC_V5_REVISION, DEFAULT_BTC_V5 } = require('../../dist/v2/strategy/btc-v5.config');
+const { BTC_V6_REVISION } = require('../../dist/v2/strategy/btc-v6.config');
 const { configurationHash } = require('../../dist/v2/strategy/approval.service');
 const { executionPrice, floorStep } = require('../../dist/v2/execution/pricing');
 const root = path.resolve(__dirname, '../..');
@@ -22,6 +23,7 @@ const selectedCase = arg('case', 'all');
 const exitMode = arg('exit-mode', DEFAULT_BTC_V5.exitMode);
 const trendMinutes = Number(arg('trend-minutes', String(DEFAULT_BTC_V5.trendMinutes)));
 const jumpPortfolio = args.includes('--jump-portfolio');
+const v6Candidate = args.includes('--v6-candidate');
 const maxV5Positions = Number(arg('max-v5-positions', '1'));
 const usdtPerTrade = Number(arg('usdt-per-trade', '30'));
 const allowIndependentLowerV5Entry = args.includes('--allow-independent-lower-v5-entry');
@@ -43,6 +45,8 @@ if (!Number.isFinite(usdtPerTrade) || usdtPerTrade < 5 || usdtPerTrade > 30)
   throw new Error('INVALID_USDT_PER_TRADE');
 if (jumpPortfolio && (disabledConditions.length || exitMode !== 'TARGET_ONLY'))
   throw new Error('INVALID_JUMP_PORTFOLIO_OPTIONS');
+if (v6Candidate && disabledConditions.length) throw new Error('INVALID_V6_OPTIONS');
+if (jumpPortfolio && v6Candidate) throw new Error('MULTIPLE_RESEARCH_MODELS');
 if (![15, 60].includes(trendMinutes)) throw new Error('INVALID_TREND_PERIOD');
 if (!['STOP_TARGET', 'TARGET_ONLY'].includes(exitMode)) throw new Error('INVALID_EXIT_MODE');
 if (
@@ -52,6 +56,7 @@ if (
     'retrospective-2025',
     'retrospective-2026-ytd',
     'cost-stress-2026-ytd',
+    'october-2026',
   ].includes(selectedCase)
 )
   throw new Error('INVALID_CASE');
@@ -91,7 +96,12 @@ const load = (start, end) => {
 };
 const evaluate = (label, start, end, stress = false) => {
   process.stderr.write(`[qualify] ${label}: ${start} to ${end}\n`);
-  const config = strategyConfiguration('btc-v5', {
+  const config = v6Candidate
+    ? strategyConfiguration('btc-v6', {
+        ...(stress ? { feeRate: 0.0015, spreadBps: 4, slippageBps: 6 } : {}),
+      })
+    : strategyConfiguration('btc-v5', {
+    ...(v6Candidate ? { maxExposure: 0.1 } : {}),
     ...(stress ? { feeRate: 0.0015, spreadBps: 4, slippageBps: 6 } : {}),
     btcV5: {
       ...DEFAULT_BTC_V5,
@@ -103,10 +113,12 @@ const evaluate = (label, start, end, stress = false) => {
         allowIndependentLowerEntry: allowIndependentLowerV5Entry,
       } : {}),
     },
-  });
+      });
   let progressMonth = '';
   let eligibleSignalMinutes = 0;
   const jumpSignalDiagnostics = [];
+  const v6ConditionPassCounts = {};
+  const v6Closest = [];
   class ProgressStrategy extends StrategyEngine {
     constructor() {
       super();
@@ -137,6 +149,15 @@ const evaluate = (label, start, end, stress = false) => {
             features: assessment.features,
           });
       } else signal = super.evaluate(history, strategy, settings);
+      if (v6Candidate && this.lastAssessment) {
+        const assessment = this.lastAssessment;
+        for (const [key, passed] of Object.entries(assessment.conditions))
+          if (passed) v6ConditionPassCounts[key] = (v6ConditionPassCounts[key] ?? 0) + 1;
+        const failed = Object.keys(assessment.conditions).filter((key) => !assessment.conditions[key]);
+        if (assessment.features && failed.length <= 3 && v6Closest.length < 100)
+          v6Closest.push({ at: new Date(assessment.at).toISOString(), failed, features: assessment.features });
+        if (signal) jumpSignalDiagnostics.push({ at: new Date(assessment.at).toISOString(), referencePrice: signal.referencePrice, features: assessment.features });
+      }
       const at = history['1m'].at(-1).closeTime;
       if (!signal && strategy === 'btc-v5' && disabledConditions.length) {
         const assessment = this.lastAssessment;
@@ -196,7 +217,7 @@ const evaluate = (label, start, end, stress = false) => {
   ).run(
     candles,
     {
-      strategy: 'btc-v5',
+      strategy: v6Candidate ? 'btc-v6' : 'btc-v5',
       initialCapital: 500,
       maxPositions: maxV5Positions,
       usdtPerTrade,
@@ -292,7 +313,7 @@ const evaluate = (label, start, end, stress = false) => {
     start,
     endExclusive: end,
     datasetHash: report.datasetHash,
-    configurationHash: configurationHash('btc-v5', BTC_V5_REVISION, config),
+    configurationHash: configurationHash(v6Candidate ? 'btc-v6' : 'btc-v5', v6Candidate ? BTC_V6_REVISION : BTC_V5_REVISION, config),
     config,
     closedTrades: m.closedTrades,
     eligibleSignalMinutes,
@@ -317,10 +338,10 @@ const evaluate = (label, start, end, stress = false) => {
       cashDifference,
     },
     riskPolicy: {
-      trendMinutes: config.btcV5.trendMinutes,
-      exitMode: config.btcV5.exitMode,
-      lossModel: config.btcV5.exitMode === 'TARGET_ONLY' ? 'FULL_NOTIONAL' : 'STOP_DISTANCE',
-      stopRiskBudgetApplies: config.btcV5.exitMode !== 'TARGET_ONLY',
+      trendMinutes: config.btcV5?.trendMinutes ?? null,
+      exitMode: config.btcV6?.exitMode ?? config.btcV5?.exitMode,
+      lossModel: (config.btcV6?.exitMode ?? config.btcV5?.exitMode) === 'TARGET_ONLY' ? 'FULL_NOTIONAL' : 'STOP_DISTANCE',
+      stopRiskBudgetApplies: (config.btcV6?.exitMode ?? config.btcV5?.exitMode) !== 'TARGET_ONLY',
       maxExposure: config.maxExposure,
       automaticTimeExit: config.timeExit,
       researchDisabledEntryConditions: disabledConditions,
@@ -341,7 +362,8 @@ const evaluate = (label, start, end, stress = false) => {
     exits,
     monthly,
     decisionReasons,
-    ...(jumpPortfolio ? { jumpSignalDiagnostics } : {}),
+    ...((jumpPortfolio || v6Candidate) ? { signalDiagnostics: jumpSignalDiagnostics } : {}),
+    ...(v6Candidate ? { v6ConditionPassCounts, v6Closest } : {}),
     qualified: failed.length === 0,
     failed,
   };
@@ -351,8 +373,8 @@ const evaluate = (label, start, end, stress = false) => {
   return result;
 };
 const result = {
-  strategy: 'btc-v5',
-  revision: BTC_V5_REVISION,
+  strategy: v6Candidate ? 'btc-v6' : 'btc-v5',
+  revision: v6Candidate ? BTC_V6_REVISION : BTC_V5_REVISION,
   exitMode,
   trendMinutes,
   jumpPortfolio,
@@ -400,7 +422,9 @@ for (const [label, start, end, stress] of [
   ['retrospective-2025', '2025-01-01', '2026-01-01', false],
   ['retrospective-2026-ytd', '2026-01-01', asOf, false],
   ['cost-stress-2026-ytd', '2026-01-01', asOf, true],
+  ['october-2026', '2026-10-01', '2026-11-01', false],
 ]) {
+  if (selectedCase === 'all' && label === 'october-2026') continue;
   if ((selectedCase !== 'all' && selectedCase !== label) || Date.parse(end) <= Date.parse(start))
     continue;
   result.periods.push(evaluate(label, start, end, stress));

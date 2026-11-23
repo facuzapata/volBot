@@ -21,6 +21,7 @@ import { validV5Parameters } from '../strategy/btc-v5.strategy';
 import { shouldPublishSignal } from '../strategy/signal-cadence';
 import { v5RecoverySummary } from '../risk/v5-recovery';
 import { BTC_V5_FIVE_MINUTE_HISTORY } from '../strategy/btc-v5.config';
+import { validV6Parameters } from '../strategy/btc-v6.config';
 
 export interface BacktestOptions {
   strategy: StrategyId;
@@ -116,7 +117,7 @@ export class BacktestingEngine {
   ) {}
   run(input: Candle[], options: BacktestOptions, tradeStart?: number, tradeEnd?: number) {
     if (
-      !['legacy-v1', 'btc-v2','btc-v3','btc-v4','btc-v5','trend-reference'].includes(options.strategy) ||
+      !['legacy-v1', 'btc-v2','btc-v3','btc-v4','btc-v5','btc-v6','trend-reference'].includes(options.strategy) ||
       !Number.isFinite(options.initialCapital) ||
       options.initialCapital < 10 ||
       !Number.isInteger(options.maxPositions) ||
@@ -143,6 +144,7 @@ export class BacktestingEngine {
     if(options.strategy==='btc-v3'&&!validV3Parameters(config.btcV3!))throw new Error('INVALID_BTC_V3_CONFIG');
     if(options.strategy==='btc-v4'&&!validV4Parameters(config.btcV4!))throw new Error('INVALID_BTC_V4_CONFIG');
     if(options.strategy==='btc-v5'&&!validV5Parameters(config.btcV5!))throw new Error('INVALID_BTC_V5_CONFIG');
+    if(options.strategy==='btc-v6'&&!validV6Parameters(config.btcV6!))throw new Error('INVALID_BTC_V6_CONFIG');
     if (
       Object.entries(config).some(
         ([key, value]) =>
@@ -215,7 +217,7 @@ export class BacktestingEngine {
       const signal = this.strategy.evaluate(history, options.strategy, config);
       if(trading&&options.strategy==='btc-v3'&&this.strategy.lastV3Assessment?.decision==='NO_TRADE'){
         const reason=this.strategy.lastV3Assessment.reason;abstentions[reason]=(abstentions[reason]??0)+1;
-      } else if (trading && (options.strategy === 'btc-v4' || options.strategy === 'btc-v5') && this.strategy.lastAssessment && !this.strategy.lastAssessment.eligible) {
+      } else if (trading && (options.strategy === 'btc-v4' || options.strategy === 'btc-v5' || options.strategy === 'btc-v6') && this.strategy.lastAssessment && !this.strategy.lastAssessment.eligible) {
         const reason=this.strategy.lastAssessment.reason;abstentions[reason]=(abstentions[reason]??0)+1;
       }
       if (shouldPublishSignal(options.strategy, !!signal, eligible) && trading) pending = signal;

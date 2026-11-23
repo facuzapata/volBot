@@ -2,7 +2,8 @@ export type Timeframe = '1m' | '5m' | '1h';
 import type { BtcV3Parameters, BtcV3Calibration } from '../strategy/btc-v3.config';
 import type { BtcV4Parameters } from '../strategy/btc-v4.config';
 import type { BtcV5Parameters } from '../strategy/btc-v5.config';
-export type StrategyId = 'legacy-v1' | 'btc-v2' | 'btc-v3' | 'btc-v4' | 'btc-v5' | 'trend-reference';
+import type { BtcV6Parameters } from '../strategy/btc-v6.config';
+export type StrategyId = 'legacy-v1' | 'btc-v2' | 'btc-v3' | 'btc-v4' | 'btc-v5' | 'btc-v6' | 'trend-reference';
 export const SIMULATOR_REVISION = 'paper-2026-11-20.causal-2';
 export interface Candle {
   symbol: 'BTCUSDT';
@@ -22,6 +23,8 @@ export interface SimulationConfig {
   btcV4?: BtcV4Parameters;
   /** Frozen parameters for the BTC-V5 intraday PAPER candidate. */
   btcV5?: BtcV5Parameters;
+  /** Aggressive BTC-V6 PAPER momentum parameters. */
+  btcV6?: BtcV6Parameters;
   buyCommissionAsset?: 'USDT' | 'BTC';
   stopModel?: 'STRUCTURE_ATR' | 'ATR_ONLY';
   confirmation5m?: boolean;
@@ -246,7 +249,8 @@ export const isOrderOpen = (o: ExchangeOrder): boolean =>
 export const isPositionOpen = (p: Position): boolean =>
   ['OPENING', 'OPEN', 'CLOSING', 'DUST'].includes(p.status);
 
-/** A missing stop is intentional only for this explicitly selected V5 PAPER mode. */
+/** A missing stop is intentional only for an explicitly configured PAPER target-only mode. */
 export const isTargetOnlyPosition = (p: Position): boolean =>
-  p.strategy === 'btc-v5' && p.executionMode === 'PAPER' &&
-  p.protectionMode === 'TARGET_ONLY' && p.config.btcV5?.exitMode === 'TARGET_ONLY';
+  p.executionMode === 'PAPER' && p.protectionMode === 'TARGET_ONLY' &&
+  ((p.strategy === 'btc-v5' && p.config.btcV5?.exitMode === 'TARGET_ONLY') ||
+    (p.strategy === 'btc-v6' && p.config.btcV6?.exitMode === 'TARGET_ONLY'));

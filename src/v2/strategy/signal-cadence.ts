@@ -5,4 +5,4 @@ export const shouldPublishSignal = (
   strategy: StrategyId,
   eligible: boolean,
   wasEligible: boolean,
-): boolean => eligible && (strategy === 'btc-v5' || !wasEligible);
+): boolean => eligible && (strategy === 'btc-v5' || strategy === 'btc-v6' || !wasEligible);

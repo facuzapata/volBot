@@ -82,7 +82,11 @@ export function assessExecutionRisk(
     reason = 'TARGET_NOT_ECONOMIC';
   else if (p.strategy === 'btc-v4' && targetPnl.lte(loss.mul(c.btcV4?.targetRiskMultiple ?? 1.8)))
     reason = 'TARGET_REWARD_RISK';
-  else if (targetOnly && targetPnl.lt(cost.mul(c.btcV5?.minNetTargetFraction ?? 0.002)))
+  else if (targetOnly && targetPnl.lt(cost.mul(
+    p.strategy === 'btc-v6'
+      ? c.btcV6?.minNetTargetFraction ?? 0.001
+      : c.btcV5?.minNetTargetFraction ?? 0.002,
+  )))
     reason = 'TARGET_NOT_ECONOMIC';
   else if (
     !targetOnly &&
