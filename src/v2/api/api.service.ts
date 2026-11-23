@@ -372,12 +372,11 @@ export class ApiService {
     await this.db.transaction(async (tx) => {
       const rows = await tx.find(StrategyVersionRow);
       if (!rows.some((row) => row.id === id)) {
-        const row = {
+        const row = await tx.save(StrategyVersionRow, {
           id,
           revision: revisionFor(id),
           state: { active: false, eligible: false, lastCandleTime: 0, lastSignalTime: 0 },
-        } as StrategyVersionRow;
-        await tx.save(row);
+        });
         rows.push(row);
       }
       for (const row of rows) {

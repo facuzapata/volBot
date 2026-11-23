@@ -75,16 +75,21 @@ describe('strategy activation', () => {
   });
 
   it('idempotently registers a known V6 row when deployment missed the data migration', async () => {
-    const rows = [
+    const rows: StrategyVersionRow[] = [
       { id: 'btc-v5', revision: BTC_V5_REVISION,
         state: { active: true, eligible: false, lastCandleTime: 0, lastSignalTime: 0 } },
     ];
+    const saveCalls: unknown[][] = [];
+    const save = async (...args: unknown[]): Promise<StrategyVersionRow> => {
+      saveCalls.push(args);
+      return (args.length === 2 ? args[1] : args[0]) as StrategyVersionRow;
+    };
     const db = {
       getRepository: () => ({ find: async () => rows }),
       transaction: async <T>(action: (tx: {
         find: (entity: unknown) => Promise<typeof rows>;
-        save: (row: (typeof rows)[number]) => Promise<void>;
-      }) => Promise<T>) => action({ find: async () => rows, save: async () => undefined }),
+        save: typeof save;
+      }) => Promise<T>) => action({ find: async () => rows, save }),
     };
     const service = new ApiService(
       { db } as unknown as StoreService, {} as never, new PaperExecutionAdapter(),
@@ -99,5 +104,6 @@ describe('strategy activation', () => {
       ['btc-v5', false],
       ['btc-v6', true],
     ]);
+    expect(saveCalls[0]).toEqual([StrategyVersionRow, expect.objectContaining({ id: 'btc-v6' })]);
   });
 });
