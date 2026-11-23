@@ -24,6 +24,10 @@ export class RiskPolicy {
     const c = signal.config;
     const targetOnly = signal.strategy === 'btc-v5' && signal.protection?.exitMode === 'TARGET_ONLY' &&
       c.btcV5?.exitMode === 'TARGET_ONLY' && (s.account.executionMode ?? 'PAPER') === 'PAPER';
+    const confirmedJump =
+      c.btcV5?.entryModel === 'CONFIRMED_JUMP' &&
+      signal.conditions.exceptionalImpulse === true &&
+      signal.conditions.continuationConfirmation === true;
     if (((signal.protection?.exitMode === 'TARGET_ONLY' ||
       (signal.strategy === 'btc-v5' && c.btcV5?.exitMode === 'TARGET_ONLY')) && !targetOnly) ||
       (targetOnly && (signal.protection!.stopPrice !== 0 || signal.protection!.horizonMs !== 0))) {
@@ -65,6 +69,7 @@ export class RiskPolicy {
     let budget = !targetOnly && (signal.strategy === 'btc-v4' || signal.strategy === 'btc-v5') && riskCostFraction > 0
       ? Decimal.min(configuredBudget, equity.mul(c.maxRiskPerTrade).div(riskCostFraction))
       : configuredBudget;
+    if (confirmedJump) budget = Decimal.min(budget, c.btcV5?.maxTicketUsdt ?? 10);
     const exposure = open.reduce(
       (a, p) => a.plus(d(p.quantity).mul(signal.referencePrice)),
       d(s.account.reserved),
@@ -82,6 +87,12 @@ export class RiskPolicy {
     let v5StopStreak = 0;
     let latestV5Exit: Position | undefined;
     const v5Parameters = c.btcV5 ?? DEFAULT_BTC_V5;
+    const maxConcurrentV5Positions = confirmedJump
+      ? c.btcV5?.maxConcurrentPositions ?? 1
+      : 1;
+    const allowIndependentLowerV5Entry = confirmedJump
+      ? c.btcV5?.allowIndependentLowerEntry ?? false
+      : false;
     if (signal.strategy === 'btc-v5') {
       if (s.account.v5RecoveryBlockedUntil && at >= s.account.v5RecoveryBlockedUntil) {
         // An elapsed cooldown starts a new observed streak. It never
@@ -134,11 +145,19 @@ export class RiskPolicy {
       reason = 'UNPROTECTED_POSITION';
     else if (open.length >= s.account.maxPositions) reason = 'MAX_POSITIONS';
     else if (signal.strategy === 'btc-v4' && open.some((p) => p.strategy === 'btc-v4')) reason = 'MAX_V4_POSITION';
-    else if (signal.strategy === 'btc-v5' && open.some((p) => p.strategy === 'btc-v5')) reason = 'MAX_V5_POSITION';
+    else if (
+      signal.strategy === 'btc-v5' &&
+      open.filter((p) => p.strategy === 'btc-v5').length >= maxConcurrentV5Positions
+    )
+      reason = 'MAX_V5_POSITION';
     else if (budget.lte(0) || budget.gt(s.account.available)) reason = 'INSUFFICIENT_BALANCE';
     else if (exposure.plus(budget).gt(equity.mul(c.maxExposure))) reason = 'MAX_EXPOSURE';
     else if (!targetOnly && (!Number.isFinite(riskDistance)||riskDistance <= 0 || riskDistance > c.maxStopPercent)) reason = 'STOP_DISTANCE';
-    else if(open.some(p=>Number(p.quantity)>0&&signal.referencePrice<Number(p.averageEntry)))reason='AVERAGING_DOWN_BLOCKED';
+    else if(
+      open.some((p) => Number(p.quantity) > 0 && signal.referencePrice < Number(p.averageEntry)) &&
+      !(signal.strategy === 'btc-v5' && targetOnly && allowIndependentLowerV5Entry)
+    )
+      reason = 'AVERAGING_DOWN_BLOCKED';
     else if (
       !targetOnly && budget
         .mul(riskCostFraction)

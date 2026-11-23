@@ -260,12 +260,15 @@ export class BtcV5Strategy {
 
 export const validV5Parameters = (p: BtcV5Parameters): boolean =>
   p.revision === BTC_V5_REVISION &&
+  p.entryModel === 'CONFIRMED_JUMP' &&
   ['STOP_TARGET', 'TARGET_ONLY'].includes(p.exitMode) &&
   [15, 60].includes(p.trendMinutes) &&
   Object.keys(DEFAULT_BTC_V5).every(
     (key) =>
       key === 'revision' ||
+      key === 'entryModel' ||
       key === 'exitMode' ||
+      key === 'allowIndependentLowerEntry' ||
       (typeof p[key] === 'number' && Number.isFinite(p[key]) && p[key] >= 0),
   ) &&
   Object.keys(p).every((key) => Object.hasOwn(DEFAULT_BTC_V5, key)) &&
@@ -307,4 +310,21 @@ export const validV5Parameters = (p: BtcV5Parameters): boolean =>
   p.maxDailyEntries >= 1 &&
   p.maxDailyEntries <= 24 &&
   p.maxCapitalLossFraction > 0 &&
-  p.maxCapitalLossFraction <= 0.02;
+  p.maxCapitalLossFraction <= 0.02 &&
+  p.targetFraction >= p.minNetTargetFraction &&
+  p.targetFraction <= p.maxTargetFraction &&
+  Number.isInteger(p.jumpResistanceBars) &&
+  p.jumpResistanceBars >= 12 &&
+  p.jumpResistanceBars <= 96 &&
+  p.jumpBreakoutAtr > 0 &&
+  p.jumpBreakoutAtr <= p.jumpMaxBreakoutAtr &&
+  p.jumpMaxBreakoutAtr <= 4 &&
+  p.jumpMinImpulseAtr >= 1 &&
+  p.jumpMinVolumeMultiple >= 2 &&
+  p.jumpMinTrendStrength > 0 &&
+  Number.isInteger(p.maxConcurrentPositions) &&
+  p.maxConcurrentPositions >= 1 &&
+  p.maxConcurrentPositions <= 5 &&
+  typeof p.allowIndependentLowerEntry === 'boolean' &&
+  p.maxTicketUsdt >= 5 &&
+  p.maxTicketUsdt <= 30;

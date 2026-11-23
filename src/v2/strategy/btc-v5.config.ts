@@ -1,12 +1,13 @@
 import { createHash } from 'crypto';
 
 /** Fixed PAPER hypothesis; changing parameters requires a new revision and replay. */
-export const BTC_V5_REVISION = '2026-11-22.v5.7';
+export const BTC_V5_REVISION = '2026-11-23.v5.9';
 /** Enough 5m candles for 100 complete 15m trend bars plus partial edge buckets. */
 export const BTC_V5_FIVE_MINUTE_HISTORY = 320;
 
 export interface BtcV5Parameters {
   revision: string;
+  entryModel: 'CONFIRMED_JUMP';
   exitMode: 'STOP_TARGET' | 'TARGET_ONLY';
   trendMinutes: 15 | 60;
   horizonMinutes: number;
@@ -33,10 +34,21 @@ export interface BtcV5Parameters {
   stopCooldownMinutes: number;
   maxDailyEntries: number;
   maxCapitalLossFraction: number;
+  targetFraction: number;
+  jumpResistanceBars: number;
+  jumpBreakoutAtr: number;
+  jumpMaxBreakoutAtr: number;
+  jumpMinImpulseAtr: number;
+  jumpMinVolumeMultiple: number;
+  jumpMinTrendStrength: number;
+  maxConcurrentPositions: number;
+  allowIndependentLowerEntry: boolean;
+  maxTicketUsdt: number;
 }
 
 export const DEFAULT_BTC_V5: Readonly<BtcV5Parameters> = {
   revision: BTC_V5_REVISION,
+  entryModel: 'CONFIRMED_JUMP',
   exitMode: 'TARGET_ONLY',
   trendMinutes: 15,
   horizonMinutes: 360,
@@ -63,6 +75,16 @@ export const DEFAULT_BTC_V5: Readonly<BtcV5Parameters> = {
   stopCooldownMinutes: 60,
   maxDailyEntries: 6,
   maxCapitalLossFraction: 0.02,
+  targetFraction: 0.008,
+  jumpResistanceBars: 24,
+  jumpBreakoutAtr: 0.5,
+  jumpMaxBreakoutAtr: 2,
+  jumpMinImpulseAtr: 2,
+  jumpMinVolumeMultiple: 10,
+  jumpMinTrendStrength: 0.0008,
+  maxConcurrentPositions: 5,
+  allowIndependentLowerEntry: true,
+  maxTicketUsdt: 10,
 };
 
 export const v5ParametersHash = (parameters: BtcV5Parameters): string =>

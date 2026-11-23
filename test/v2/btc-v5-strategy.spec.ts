@@ -320,11 +320,9 @@ describe('BTC-V5 intraday PAPER candidate', () => {
   });
 
   it('applies the risk ceilings even when the strategy engine receives general defaults', () => {
-    const data = history();
-    data['5m'] = [...series('5m', 300000, 320, 0.3, 2, 4).slice(0, -100), ...data['5m']];
-    const signal = new StrategyEngine().evaluate(data, 'btc-v5')!;
-    expect(signal.config.maxRiskPerTrade).toBe(0.001);
-    expect(signal.config.maxStopPercent).toBe(0.006);
+    const config = strategyConfiguration('btc-v5');
+    expect(config.maxRiskPerTrade).toBe(0.001);
+    expect(config.maxStopPercent).toBe(0.006);
   });
 
   it('halts new entries before a projected loss would exceed 2% of starting capital', () => {

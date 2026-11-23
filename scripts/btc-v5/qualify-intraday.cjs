@@ -4,6 +4,11 @@ const path = require('path');
 const { createHash } = require('crypto');
 const { BacktestingEngine } = require('../../dist/v2/backtesting/backtesting.engine');
 const { StrategyEngine } = require('../../dist/v2/strategy/strategy-engine');
+const { RiskPolicy } = require('../../dist/v2/risk/risk-policy');
+const {
+  BtcV5JumpStrategy,
+  BTC_V5_JUMP_REVISION,
+} = require('../../dist/v2/strategy/btc-v5-jump.strategy');
 const { strategyConfiguration } = require('../../dist/v2/strategy/versions');
 const { BTC_V5_REVISION, DEFAULT_BTC_V5 } = require('../../dist/v2/strategy/btc-v5.config');
 const { configurationHash } = require('../../dist/v2/strategy/approval.service');
@@ -16,6 +21,28 @@ const asOf = arg('as-of', '2026-11-22');
 const selectedCase = arg('case', 'all');
 const exitMode = arg('exit-mode', DEFAULT_BTC_V5.exitMode);
 const trendMinutes = Number(arg('trend-minutes', String(DEFAULT_BTC_V5.trendMinutes)));
+const jumpPortfolio = args.includes('--jump-portfolio');
+const maxV5Positions = Number(arg('max-v5-positions', '1'));
+const usdtPerTrade = Number(arg('usdt-per-trade', '30'));
+const allowIndependentLowerV5Entry = args.includes('--allow-independent-lower-v5-entry');
+const disabledConditions = arg('disable-conditions', '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+const allowedDisabledConditions = new Set([
+  'trend15m',
+  'referenceGeometry',
+  'referenceRewardRisk',
+  'targetRoom',
+]);
+if (disabledConditions.some((condition) => !allowedDisabledConditions.has(condition)))
+  throw new Error('INVALID_DISABLED_CONDITION');
+if (!Number.isInteger(maxV5Positions) || maxV5Positions < 1 || maxV5Positions > 5)
+  throw new Error('INVALID_MAX_V5_POSITIONS');
+if (!Number.isFinite(usdtPerTrade) || usdtPerTrade < 5 || usdtPerTrade > 30)
+  throw new Error('INVALID_USDT_PER_TRADE');
+if (jumpPortfolio && (disabledConditions.length || exitMode !== 'TARGET_ONLY'))
+  throw new Error('INVALID_JUMP_PORTFOLIO_OPTIONS');
 if (![15, 60].includes(trendMinutes)) throw new Error('INVALID_TREND_PERIOD');
 if (!['STOP_TARGET', 'TARGET_ONLY'].includes(exitMode)) throw new Error('INVALID_EXIT_MODE');
 if (
@@ -66,32 +93,113 @@ const evaluate = (label, start, end, stress = false) => {
   process.stderr.write(`[qualify] ${label}: ${start} to ${end}\n`);
   const config = strategyConfiguration('btc-v5', {
     ...(stress ? { feeRate: 0.0015, spreadBps: 4, slippageBps: 6 } : {}),
-    btcV5: { ...DEFAULT_BTC_V5, exitMode, trendMinutes },
+    btcV5: {
+      ...DEFAULT_BTC_V5,
+      exitMode,
+      trendMinutes,
+      ...(jumpPortfolio ? {
+        maxTargetFraction: 0.008,
+        maxConcurrentPositions: maxV5Positions,
+        allowIndependentLowerEntry: allowIndependentLowerV5Entry,
+      } : {}),
+    },
   });
   let progressMonth = '';
   let eligibleSignalMinutes = 0;
+  const jumpSignalDiagnostics = [];
   class ProgressStrategy extends StrategyEngine {
+    constructor() {
+      super();
+      this.jump = new BtcV5JumpStrategy();
+    }
     evaluate(history, strategy, settings) {
       const month = new Date(history['1m'].at(-1).openTime).toISOString().slice(0, 7);
       if (month !== progressMonth) {
         progressMonth = month;
         process.stderr.write(`[replay] ${label} ${month}\n`);
       }
-      const signal = super.evaluate(history, strategy, settings);
+      let signal;
+      if (jumpPortfolio && strategy === 'btc-v5') {
+        const assessment = this.jump.assess(history, settings);
+        this.lastAssessment = {
+          at: assessment.at,
+          eligible: assessment.decision === 'BUY',
+          regime: assessment.conditions.trendMomentum ? 'up' : 'other',
+          reason: assessment.reason,
+          conditions: assessment.conditions,
+          features: assessment.features,
+        };
+        signal = assessment.signal ?? null;
+        if (signal)
+          jumpSignalDiagnostics.push({
+            at: new Date(assessment.at).toISOString(),
+            referencePrice: signal.referencePrice,
+            features: assessment.features,
+          });
+      } else signal = super.evaluate(history, strategy, settings);
       const at = history['1m'].at(-1).closeTime;
+      if (!signal && strategy === 'btc-v5' && disabledConditions.length) {
+        const assessment = this.lastAssessment;
+        const failed = assessment
+          ? Object.keys(assessment.conditions).filter((condition) => !assessment.conditions[condition])
+          : [];
+        if (
+          assessment?.features &&
+          failed.length > 0 &&
+          failed.every((condition) => disabledConditions.includes(condition))
+        ) {
+          const features = assessment.features;
+          const last = history['1m'].at(-1);
+          const conditions = { ...assessment.conditions };
+          for (const condition of disabledConditions) conditions[condition] = true;
+          signal = {
+            id: createHash('sha256')
+              .update(`btc-v5-research:${disabledConditions.join(',')}:BTCUSDT:${at}`)
+              .digest('hex'),
+            strategy: 'btc-v5',
+            strategyRevision: BTC_V5_REVISION,
+            symbol: 'BTCUSDT',
+            candleTime: at,
+            referencePrice: last.close,
+            atr: features.atr5m,
+            swingLow: features.referenceStopPrice,
+            regime: 'up',
+            conditions,
+            config: { ...settings },
+            protection: {
+              stopPrice: exitMode === 'TARGET_ONLY' ? 0 : features.referenceStopPrice,
+              targetPrice: features.targetPrice,
+              horizonMs: exitMode === 'TARGET_ONLY' ? 0 : settings.btcV5.horizonMinutes * 60000,
+              timeframe: '5m',
+              exitMode,
+            },
+          };
+          this.lastAssessment = {
+            ...assessment,
+            eligible: true,
+            regime: 'up',
+            reason: `RESEARCH_OVERRIDE_${disabledConditions.join('_').toUpperCase()}`,
+            conditions,
+          };
+        }
+      }
       if (signal && at >= Date.parse(`${start}T00:00:00Z`) && at < Date.parse(`${end}T00:00:00Z`))
         eligibleSignalMinutes++;
       return signal;
     }
   }
   const candles = load(start, end);
-  const report = new BacktestingEngine(new ProgressStrategy()).run(
+  const report = new BacktestingEngine(
+    new ProgressStrategy(),
+    undefined,
+    new RiskPolicy(),
+  ).run(
     candles,
     {
       strategy: 'btc-v5',
       initialCapital: 500,
-      maxPositions: 1,
-      usdtPerTrade: 30,
+      maxPositions: maxV5Positions,
+      usdtPerTrade,
       config,
     },
     Date.parse(`${start}T00:00:00Z`),
@@ -215,6 +323,12 @@ const evaluate = (label, start, end, stress = false) => {
       stopRiskBudgetApplies: config.btcV5.exitMode !== 'TARGET_ONLY',
       maxExposure: config.maxExposure,
       automaticTimeExit: config.timeExit,
+      researchDisabledEntryConditions: disabledConditions,
+      jumpPortfolio,
+      jumpRevision: jumpPortfolio ? BTC_V5_JUMP_REVISION : null,
+      maxConcurrentV5Positions: maxV5Positions,
+      allowIndependentLowerV5Entry,
+      usdtPerTrade,
     },
     profitFactor: m.profitFactor === null ? null : round(m.profitFactor),
     winRatePct: round(m.winRate * 100),
@@ -227,6 +341,7 @@ const evaluate = (label, start, end, stress = false) => {
     exits,
     monthly,
     decisionReasons,
+    ...(jumpPortfolio ? { jumpSignalDiagnostics } : {}),
     qualified: failed.length === 0,
     failed,
   };
@@ -240,8 +355,14 @@ const result = {
   revision: BTC_V5_REVISION,
   exitMode,
   trendMinutes,
+  jumpPortfolio,
+  jumpRevision: jumpPortfolio ? BTC_V5_JUMP_REVISION : null,
+  maxConcurrentV5Positions: maxV5Positions,
+  allowIndependentLowerV5Entry,
+  usdtPerTrade,
+  researchDisabledEntryConditions: disabledConditions,
   asOf,
-  protocol: `Fixed ${BTC_V5_REVISION} intraday hypothesis. All historical periods were previously inspected; these are retrospective checks, not untouched out-of-sample evidence. Costs included. No parameter search. No forced final liquidation. A pass requires prospective PAPER observation.`,
+  protocol: `Fixed ${jumpPortfolio ? BTC_V5_JUMP_REVISION : BTC_V5_REVISION} intraday hypothesis${jumpPortfolio ? ` with exceptional jump entries and up to ${maxV5Positions} concurrent target-only positions` : ''}${disabledConditions.length ? ` with research-only disabled entry conditions: ${disabledConditions.join(', ')}` : ''}. All historical periods were previously inspected; these are retrospective checks, not untouched out-of-sample evidence. Costs included. No parameter search. No forced final liquidation. A pass requires prospective PAPER observation.`,
   periods: [],
   complete: false,
   qualified: false,
@@ -250,6 +371,7 @@ const result = {
     [
       'src/v2/strategy/btc-v5.config.ts',
       'src/v2/strategy/btc-v5.strategy.ts',
+      ...(jumpPortfolio ? ['src/v2/strategy/btc-v5-jump.strategy.ts'] : []),
       'src/v2/strategy/fifteen-minute-bars.ts',
       'src/v2/market/market-data.service.ts',
       'src/v2/strategy/versions.ts',

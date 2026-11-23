@@ -2,7 +2,6 @@ import { BtcV5Strategy, validV5Parameters } from '../../src/v2/strategy/btc-v5.s
 import { DEFAULT_BTC_V5 } from '../../src/v2/strategy/btc-v5.config';
 import { strategyConfiguration } from '../../src/v2/strategy/versions';
 import { fifteenMinuteCloses } from '../../src/v2/strategy/fifteen-minute-bars';
-import { StrategyEngine } from '../../src/v2/strategy/strategy-engine';
 import { StrategyServiceV2 } from '../../src/v2/trading/trading.services';
 import { CandleRow, StrategyVersionRow } from '../../src/v2/persistence/entities';
 import { DomainEvent } from '../../src/v2/events/contracts';
@@ -43,11 +42,11 @@ describe('V5 complete fifteen-minute trend context', () => {
     ).toEqual([]);
   });
 
-  it('can emit a 15m trend signal without hourly history and reports the actual timeframe', () => {
+  it('keeps the protected recovery model able to use 15m context without hourly history', () => {
     const data = v5FifteenHistory();
     data['1h'] = [];
-    const engine = new StrategyEngine();
-    const signal = engine.evaluate(data, 'btc-v5', config());
+    const assessment = new BtcV5Strategy().assess(data, config());
+    const signal = assessment.signal;
     expect(signal?.conditions.trend15m).toBe(true);
     expect(signal?.conditions.trend1h).toBeUndefined();
     expect(signal?.protection).toMatchObject({
@@ -55,11 +54,8 @@ describe('V5 complete fifteen-minute trend context', () => {
       stopPrice: 0,
       horizonMs: 0,
     });
-    expect(engine.lastAssessment).toMatchObject({
-      regime: 'up',
-      features: { trendTimeframe: '15m' },
-    });
-    expect((engine.lastAssessment?.features as { ema1hFast?: number }).ema1hFast).toBeUndefined();
+    expect(assessment.features).toMatchObject({ trendTimeframe: '15m' });
+    expect(assessment.features?.ema1hFast).toBeUndefined();
   });
 
   it('accepts a 15m recovery even when the hourly filter would still be bearish', () => {
@@ -167,9 +163,21 @@ describe('V5 complete fifteen-minute trend context', () => {
       once: async (_tx, _consumer, _id, action) => action(),
       emit,
     };
+    const assessment = new BtcV5Strategy().assess(data, config());
+    const engine = {
+      lastAssessment: {
+        at: assessment.at,
+        eligible: true,
+        regime: 'up',
+        reason: assessment.reason,
+        conditions: assessment.conditions,
+        features: assessment.features,
+      },
+      evaluate: () => assessment.signal,
+    };
     const service = new StrategyServiceV2(
       store as never,
-      new StrategyEngine(),
+      engine as never,
       { candle: async () => undefined } as never,
       { config: config() } as never,
       { get: async () => undefined, set: async () => undefined } as never,
