@@ -383,7 +383,7 @@ export class ApiService {
         const active = row.id === id;
         if (row.state.active !== active) {
           row.state = { ...row.state, active };
-          await tx.save(row);
+          await tx.save(StrategyVersionRow, row);
         }
       }
     });

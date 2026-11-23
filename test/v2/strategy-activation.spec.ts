@@ -104,6 +104,8 @@ describe('strategy activation', () => {
       ['btc-v5', false],
       ['btc-v6', true],
     ]);
+    expect(saveCalls).toHaveLength(3);
+    expect(saveCalls.every((args) => args[0] === StrategyVersionRow)).toBe(true);
     expect(saveCalls[0]).toEqual([StrategyVersionRow, expect.objectContaining({ id: 'btc-v6' })]);
   });
 });
