@@ -39,6 +39,66 @@ describe('BTC-V6 aggressive PAPER momentum', () => {
     expect(Number(state.orders[0].reservedQuote)).toBe(30);
   });
 
+  const filledV6 = () => {
+    const signal = new StrategyEngine().evaluate(history, 'btc-v6', strategyConfiguration('btc-v6'))!;
+    const state = newAccount('v6', 'v6', 500, 3, 100);
+    state.account.entriesEnabled = true;
+    const paper = new PaperExecutionAdapter();
+    expect(paper.reserve(state, signal, signal.candleTime).accepted).toBe(true);
+    paper.execute(state, state.orders[0].id, signal.referencePrice, signal.candleTime, 1);
+    expect(state.orders[0].status).toBe('FILLED');
+    return { state, signal, paper };
+  };
+
+  it('executes an independent lower entry accepted by the reservation policy', () => {
+    const { state, signal, paper } = filledV6();
+    const first = { ...state.positions[0] };
+    const lower = { ...signal, id: 'lower', candleTime: signal.candleTime + 60000,
+      referencePrice: signal.referencePrice * 0.97,
+      protection: { ...signal.protection!, targetPrice: signal.protection!.targetPrice * 0.97 } };
+    expect(paper.reserve(state, lower, lower.candleTime).accepted).toBe(true);
+    paper.execute(state, state.orders[1].id, lower.referencePrice, lower.candleTime, 1);
+    expect(state.orders[1].status).toBe('FILLED');
+    expect(state.orders[1].executionRisk?.reason).toBe('ACCEPTED');
+    expect(state.positions[0]).toEqual(first);
+    expect(state.positions[1].id).not.toBe(first.id);
+    expect(Number(state.account.reserved)).toBe(0);
+    expect(state.fills).toHaveLength(2);
+    paper.assertInvariants(state);
+  });
+
+  it('keeps the averaging-down block for another slice of the same position', () => {
+    const { state, signal, paper } = filledV6();
+    const next = { ...signal, id: 'partial', candleTime: signal.candleTime + 60000 };
+    expect(paper.reserve(state, next, next.candleTime).accepted).toBe(true);
+    paper.execute(state, state.orders[1].id, next.referencePrice, next.candleTime, 0.0001);
+    expect(state.orders[1].status).toBe('PARTIALLY_FILLED');
+    const quantity = state.positions[1].quantity;
+    paper.execute(state, state.orders[1].id, next.referencePrice * 0.999, next.candleTime + 1, 1);
+    expect(state.orders[1].rejection).toBe('AVERAGING_DOWN_BLOCKED');
+    expect(state.positions[1].quantity).toBe(quantity);
+    expect(Number(state.account.reserved)).toBe(0);
+    paper.assertInvariants(state);
+  });
+
+  it('waits through a decline and creates a SELL when the target is reached', () => {
+    const { state, signal, paper } = filledV6();
+    const bar = (openTime: number, price: number, high = price): Candle => ({
+      symbol: 'BTCUSDT', timeframe: '1m', openTime, closeTime: openTime + 59999,
+      open: price, close: price, high, low: price, volume: 100,
+    });
+    const openTime = signal.candleTime + 1 + 8 * 3600000;
+    paper.onCandle(state, bar(openTime, signal.referencePrice * 0.97), true);
+    expect(state.positions[0].status).toBe('OPEN');
+    expect(state.orders.filter(order => order.side === 'SELL')).toHaveLength(0);
+    const target = Number(state.positions[0].takeProfit);
+    paper.onCandle(state, bar(openTime + 60000, signal.referencePrice, target + 1));
+    expect(state.positions[0].status).toBe('CLOSED');
+    expect(state.positions[0].exitReason).toBe('TAKE_PROFIT');
+    expect(state.orders.at(-1)).toMatchObject({ side: 'SELL', status: 'FILLED' });
+    expect(Number(state.positions[0].realizedPnl)).toBeGreaterThan(0);
+  });
+
   const smallerBreakout = (): MarketHistory => {
     const bars = minutes.map(bar => ({ ...bar, high: resistance - 85 }));
     // A high 30 minutes ago blocks V6.1, but is outside the new 20-minute window.

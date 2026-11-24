@@ -113,9 +113,11 @@ export function assessExecutionRisk(
   )
     reason = 'V5_CAPITAL_LOSS_LIMIT';
   else if (
-    s.positions.some(
+    // V6 reservations explicitly allow independent target-only PAPER entries
+    // below earlier entries. Do not reinterpret them as additions to that inventory.
+    (!(p.strategy === 'btc-v6' && targetOnly) && s.positions.some(
       (x) => Number(x.quantity) > 0 && x.id !== p.id && reference < Number(x.averageEntry),
-    ) ||
+    )) ||
     (q0.gt(0) && new Decimal(reference).lt(p.averageEntry))
   )
     reason = 'AVERAGING_DOWN_BLOCKED';

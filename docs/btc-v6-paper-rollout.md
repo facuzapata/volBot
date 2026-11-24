@@ -19,6 +19,16 @@ V6 is `TARGET_ONLY`: no stop, time exit or invalidation exit. `usdtPerTrade` and
 no daily entry-count limit. Exchange filters, available balance and the generic
 account exposure check still apply.
 
+Independent V6 target-only PAPER entries may execute below another position's
+entry price, as allowed by reservation. Each entry retains its own inventory and
+target. Adding a lower-priced partial fill to the same position remains blocked.
+An accepted decision records reservation; execution can still reject an order
+after rechecking balance, exposure, target economics and exchange filters.
+The rejection code is stored in the order's `rejection` and `executionRisk.reason`
+fields and in the ledger entry that releases its reservation.
+SELL orders are created when a candle reaches the stored target or a manual
+close is requested; a falling price alone does not generate a V6 sell.
+
 ## Deployment
 
 1. Deploy API and worker from the same commit.
