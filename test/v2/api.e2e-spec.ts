@@ -16,10 +16,13 @@ import { BacktestingEngine } from '../../src/v2/backtesting/backtesting.engine';
 import { StrategyApprovalService } from '../../src/v2/strategy/approval.service';
 import { SimulationSettings } from '../../src/v2/market/simulation-settings';
 import { BinanceCredentialsService } from '../../src/v2/execution/binance-credentials.service';
+import { signal } from './fixtures';
 
 describe('V2 HTTP contract with isolated persistence double', () => {
   let app: INestApplication;
   let token: string;
+  let api: ApiService;
+  let summaryState: ReturnType<typeof newAccount> | undefined;
   const user = {
     id: '11111111-1111-4111-8111-111111111111',
     email: 'test@example.com',
@@ -31,6 +34,7 @@ describe('V2 HTTP contract with isolated persistence double', () => {
   const state = newAccount('22222222-2222-4222-8222-222222222222', user.id);
   const db = {
     getRepository: (entity: unknown) => ({
+      findOne: async () => null,
       findOneBy: async (where: { id?: string; userId?: string }) =>
         entity === V2User
           ? where.id === user.id
@@ -59,7 +63,7 @@ describe('V2 HTTP contract with isolated persistence double', () => {
           provide: StoreService,
           useValue: {
             db,
-            readAccount: async () => state,
+            readAccount: async () => summaryState ?? state,
             accountTransaction: async (_id: string, callback: (s: typeof state) => Promise<void>) =>
               callback(state),
           },
@@ -71,6 +75,7 @@ describe('V2 HTTP contract with isolated persistence double', () => {
     app = module.createNestApplication();
     setupApi(app);
     await app.init();
+    api = module.get(ApiService);
     token = await module
       .get(JwtService)
       .signAsync(
@@ -87,6 +92,41 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${token}`)
       .expect(403);
+  });
+  it.each([false, true])('serializes all summary fields from existing history (trades: %s)', async (withHistory) => {
+    const history = newAccount(state.account.id, user.id);
+    if (withHistory) {
+      const paper = new PaperExecutionAdapter();
+      history.account.entriesEnabled = true;
+      for (const [index, exitPrice] of [101000, 100100, 100000].entries()) {
+        const sig = signal(`summary-${index}`, signal().candleTime + index * 60000);
+        if (index === 2) sig.config.feeRate = 0;
+        expect(paper.reserve(history, sig, sig.candleTime).accepted).toBe(true);
+        const buy = history.orders[history.orders.length - 1];
+        paper.execute(history, buy.id, 100000, sig.candleTime, 1);
+        const exit = paper.requestExit(history, buy.positionId, sig.candleTime + 1, 'USER_CLOSE')!;
+        paper.execute(history, exit.id, exitPrice, sig.candleTime + 2, 1);
+        expect(history.positions[index].status).toBe('CLOSED');
+      }
+      history.ledger.push({ id: 'unassigned', orderId: '', positionId: '', asset: 'BTC', availableDelta: '0.00000001', reservedDelta: '0', reason: 'ADJUSTMENT', at: 0 });
+    }
+    summaryState = history;
+    const before = JSON.stringify(history);
+    try {
+      const stats = await request(app.getHttpServer()).get('/api/me/stats').set('Authorization', `Bearer ${token}`).expect(200);
+      expect(stats.body).toEqual(await api.stats(user.id));
+      expect(stats.body).toMatchObject({
+        closedTrades: withHistory ? 3 : 0, winningTrades: withHistory ? 1 : 0,
+        losingTrades: withHistory ? 1 : 0, breakevenTrades: withHistory ? 1 : 0,
+      });
+      expect(stats.body.winningTrades + stats.body.losingTrades + stats.body.breakevenTrades).toBe(stats.body.closedTrades);
+      const balance = await request(app.getHttpServer()).get('/api/me/balance').set('Authorization', `Bearer ${token}`).expect(200);
+      expect(balance.body).toEqual(await api.balance(user.id));
+      expect(balance.body).toMatchObject({ totalBTC: withHistory ? '0.00000001' : '0', assignedBTC: '0', unassignedBTC: withHistory ? '0.00000001' : '0', dustBTC: '0' });
+      expect(JSON.stringify(history)).toBe(before);
+    } finally {
+      summaryState = undefined;
+    }
   });
   it('enables entries without a separate strategy-approval workflow', async () => {
     await request(app.getHttpServer()).patch('/api/me/entries').set('Authorization', `Bearer ${token}`).send({ enabled:true }).expect(200);

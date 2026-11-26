@@ -9,6 +9,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
+import Decimal from 'decimal.js';
 import { DataSource, EntityManager, IsNull } from 'typeorm';
 import { liveTradingEnabled, numberEnv, refreshTokenTtlDays, selectedStrategy } from '../config';
 import { AccountState, isOrderOpen, StrategyId } from '../domain/model';
@@ -272,11 +273,22 @@ export class ApiService {
   async balance(userId: string) {
     const s = await this.state(userId);
     const last = await this.latest();
+    // BTC reservations cover existing inventory; they do not add to the balance.
+    const totalBTC = s.ledger
+      .filter((entry) => entry.asset === 'BTC')
+      .reduce((sum, entry) => sum.plus(entry.availableDelta).plus(entry.reservedDelta), new Decimal(0));
+    const assignedBTC = s.positions.reduce((sum, p) => sum.plus(p.quantity), new Decimal(0));
+    const dustBTC = s.positions
+      .filter((p) => p.status === 'DUST')
+      .reduce((sum, p) => sum.plus(p.quantity), new Decimal(0));
     return {
       mode: s.account.executionMode ?? 'PAPER',
       availableUSDT: s.account.available,
       reservedUSDT: s.account.reserved,
-      assignedBTC: String(s.positions.reduce((n, p) => n + Number(p.quantity), 0)),
+      totalBTC: totalBTC.toFixed(),
+      assignedBTC: assignedBTC.toFixed(),
+      unassignedBTC: totalBTC.minus(assignedBTC).toFixed(),
+      dustBTC: dustBTC.toFixed(),
       reservedBTC: String(
         s.orders
           .filter((o) => o.side === 'SELL' && isOrderOpen(o))

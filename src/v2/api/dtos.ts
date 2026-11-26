@@ -161,6 +161,9 @@ export class BalanceDto {
   @ApiProperty({ example: '500.000000000000' }) availableUSDT!: string;
   @ApiProperty({ example: '30.000000000000' }) reservedUSDT!: string;
   @ApiProperty({ example: '0.000300000000' }) assignedBTC!: string;
+  @ApiProperty({ example: '0.00031000', description: 'Total virtual BTC inventory from the ledger, including reservations.' }) totalBTC!: string;
+  @ApiProperty({ example: '0.00001000', description: 'Ledger BTC not assigned to a position. Reserved exits are already included in assignedBTC.' }) unassignedBTC!: string;
+  @ApiProperty({ example: '0.00000100', description: 'BTC in DUST positions, already included in assignedBTC.' }) dustBTC!: string;
   @ApiProperty({
     example: '0.000300000000',
     description: 'Assigned quantity covered by a pending exit',
@@ -195,6 +198,9 @@ export class StatsDto {
   @ApiProperty({ example: -0.1 }) unrealizedPnl!: number;
   @ApiProperty({ example: 501.15 }) equity!: number;
   @ApiProperty({ example: 10 }) closedTrades!: number;
+  @ApiProperty({ example: 6, description: 'Closed positions with positive net realized P&L.' }) winningTrades!: number;
+  @ApiProperty({ example: 3, description: 'Closed positions with negative net realized P&L.' }) losingTrades!: number;
+  @ApiProperty({ example: 1, description: 'Closed positions with zero net realized P&L.' }) breakevenTrades!: number;
   @ApiProperty({ example: 1.2, nullable: true }) profitFactor!: number | null;
   @ApiProperty({ example: 0.125 }) expectancy!: number;
   @ApiProperty({ example: 0.6 }) winRate!: number;

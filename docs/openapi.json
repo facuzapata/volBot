@@ -2147,6 +2147,21 @@
             "type": "string",
             "example": "0.000300000000"
           },
+          "totalBTC": {
+            "type": "string",
+            "example": "0.00031000",
+            "description": "Total virtual BTC inventory from the ledger, including reservations."
+          },
+          "unassignedBTC": {
+            "type": "string",
+            "example": "0.00001000",
+            "description": "Ledger BTC not assigned to a position. Reserved exits are already included in assignedBTC."
+          },
+          "dustBTC": {
+            "type": "string",
+            "example": "0.00000100",
+            "description": "BTC in DUST positions, already included in assignedBTC."
+          },
           "reservedBTC": {
             "type": "string",
             "example": "0.000300000000",
@@ -2166,6 +2181,9 @@
           "availableUSDT",
           "reservedUSDT",
           "assignedBTC",
+          "totalBTC",
+          "unassignedBTC",
+          "dustBTC",
           "reservedBTC",
           "equityUSDT",
           "entriesEnabled"
@@ -2645,6 +2663,21 @@
             "type": "number",
             "example": 10
           },
+          "winningTrades": {
+            "type": "number",
+            "example": 6,
+            "description": "Closed positions with positive net realized P&L."
+          },
+          "losingTrades": {
+            "type": "number",
+            "example": 3,
+            "description": "Closed positions with negative net realized P&L."
+          },
+          "breakevenTrades": {
+            "type": "number",
+            "example": 1,
+            "description": "Closed positions with zero net realized P&L."
+          },
           "profitFactor": {
             "type": "object",
             "example": 1.2,
@@ -2672,6 +2705,9 @@
           "unrealizedPnl",
           "equity",
           "closedTrades",
+          "winningTrades",
+          "losingTrades",
+          "breakevenTrades",
           "profitFactor",
           "expectancy",
           "winRate",

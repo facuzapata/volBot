@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import Decimal from 'decimal.js';
 import {
   AccountState,
   Candle,
@@ -33,8 +34,10 @@ export interface BacktestOptions {
 }
 export function statistics(s: AccountState, lastPrice: number, equityCurve: number[] = []) {
   const closed = s.positions.filter((p) => p.status === 'CLOSED');
-  const wins = closed.filter((p) => Number(p.realizedPnl) > 0);
-  const losses = closed.filter((p) => Number(p.realizedPnl) < 0);
+  // Execution has already deducted acquisition costs and exit commissions.
+  // Compare the stored decimal directly, without rounding small outcomes to zero.
+  const wins = closed.filter((p) => new Decimal(p.realizedPnl).gt(0));
+  const losses = closed.filter((p) => new Decimal(p.realizedPnl).lt(0));
   const positive = wins.reduce((n, p) => n + Number(p.realizedPnl), 0);
   const negative = -losses.reduce((n, p) => n + Number(p.realizedPnl), 0);
   const net = s.positions.reduce((n, p) => n + Number(p.realizedPnl), 0);
@@ -57,6 +60,9 @@ export function statistics(s: AccountState, lastPrice: number, equityCurve: numb
   return {
     mode: 'PAPER',
     closedTrades: closed.length,
+    winningTrades: wins.length,
+    losingTrades: losses.length,
+    breakevenTrades: closed.length - wins.length - losses.length,
     openPositions: s.positions.filter(isPositionOpen).length,
     netRealizedPnl: net,
     unrealizedPnl: unrealized,
