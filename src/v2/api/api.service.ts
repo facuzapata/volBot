@@ -33,6 +33,7 @@ import { strategyConfiguration, revisionFor } from '../strategy/versions';
 import { DEFAULT_BTC_V3 } from '../strategy/btc-v3.config';
 import { SimulationSettings } from '../market/simulation-settings';
 import { BinanceCredentialsService } from '../execution/binance-credentials.service';
+import { telegramStatus } from '../notifications/notification.service';
 import {
   BacktestDto,
   CreateUserDto,
@@ -199,6 +200,11 @@ export class ApiService {
     const row = await this.db.getRepository(VirtualAccountRow).findOneBy({ userId });
     if (!row) throw new NotFoundException('Virtual account not found');
     return this.store.readAccount(row.id);
+  }
+  async notifications(userId: string) {
+    const user = await this.db.getRepository(V2User).findOneBy({ id: userId });
+    if (!user) throw new NotFoundException('User not found');
+    return { telegram: telegramStatus(user) };
   }
   async accountId(userId: string): Promise<string> {
     const row = await this.db.getRepository(VirtualAccountRow).findOneBy({ userId });

@@ -3,6 +3,7 @@ import type { BtcV3Parameters, BtcV3Calibration } from '../strategy/btc-v3.confi
 import type { BtcV4Parameters } from '../strategy/btc-v4.config';
 import type { BtcV5Parameters } from '../strategy/btc-v5.config';
 import type { BtcV6Parameters } from '../strategy/btc-v6.config';
+import type { DynamicTakeProfitConfig, DynamicTakeProfitState } from '../execution/dynamic-take-profit';
 export type StrategyId = 'legacy-v1' | 'btc-v2' | 'btc-v3' | 'btc-v4' | 'btc-v5' | 'btc-v6' | 'trend-reference';
 export const SIMULATOR_REVISION = 'paper-2026-11-20.causal-2';
 export interface Candle {
@@ -25,6 +26,8 @@ export interface SimulationConfig {
   btcV5?: BtcV5Parameters;
   /** Aggressive BTC-V6 PAPER momentum parameters. */
   btcV6?: BtcV6Parameters;
+  /** Opt-in exit policy, snapshotted on NEW V6 PAPER positions only. */
+  v6DynamicTakeProfit?: DynamicTakeProfitConfig;
   buyCommissionAsset?: 'USDT' | 'BTC';
   stopModel?: 'STRUCTURE_ATR' | 'ATR_ONLY';
   confirmation5m?: boolean;
@@ -212,6 +215,7 @@ export interface Position {
   openedAt: number;
   closedAt?: number;
   exitReason?: string;
+  dynamicTakeProfit?: DynamicTakeProfitState;
   config: SimulationConfig;
 }
 export interface VirtualAccount {

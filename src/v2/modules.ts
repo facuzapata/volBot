@@ -166,9 +166,11 @@ export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
       );
     });
     this.server.listen(Number(process.env.V2_WORKER_PORT || 3101), '0.0.0.0');
+    // Catch up yesterday on restart. dailySummary is idempotent per account/day.
+    void this.notifications.dailySummary().catch(() => undefined);
     this.dailyTimer = setInterval(() => {
       const date = new Date();
-      if (date.getUTCHours() === 23 && date.getUTCMinutes() === 59)
+      if (date.getUTCMinutes() === 0)
         void this.notifications.dailySummary().catch(() => undefined);
     }, 30000);
   }

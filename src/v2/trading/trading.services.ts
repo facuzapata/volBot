@@ -148,6 +148,30 @@ export class PositionManagerService {
     private readonly engine: StrategyEngine,
     private readonly _approvals?: StrategyApprovalService,
   ) {}
+  async price(event: DomainEvent<'market.price.observed.v1'>): Promise<void> {
+    const observation = event.payload;
+    const now = Date.now();
+    if (observation.symbol !== 'BTCUSDT' || !Number.isSafeInteger(observation.at) ||
+      now < observation.at || now - observation.at > 10000 ||
+      !Number.isFinite(Number(observation.price)) || Number(observation.price) <= 0) return;
+    // JSONB positions already persist the exit state; no account or inventory migration.
+    const rows: { accountId: string }[] = await this.store.db.query(
+      `SELECT DISTINCT "accountId" FROM v2_positions WHERE data->>'strategy' = 'btc-v6'
+       AND data->>'executionMode' = 'PAPER' AND data ? 'dynamicTakeProfit'
+       AND data->>'status' IN ('OPEN', 'CLOSING')`,
+    );
+    const minute = Math.floor(observation.at / 60000) * 60000;
+    for (const { accountId } of rows.sort((a, b) => a.accountId.localeCompare(b.accountId))) {
+      if (Date.now() - observation.at > 10000) return;
+      await this.store.accountTransaction(accountId, async (s, tx) => {
+        if (Date.now() - observation.at > 10000) return;
+        const rate = Math.min(simulationConfig().participationRate,
+          ...s.positions.filter((p) => p.dynamicTakeProfit).map((p) => p.config.participationRate));
+        const budget = await this.store.causalBudget(tx, minute, rate);
+        this.paper.onPrice(s, observation, budget);
+      }, minute);
+    }
+  }
   async candle(
     event: DomainEvent<'market.candle.closed.v1'>,
     history: MarketHistory,
@@ -199,6 +223,9 @@ export class StrategyServiceV2 {
     private readonly settings: SimulationSettings,
     private readonly cache: RedisCacheService,
   ) {}
+  price(event: DomainEvent<'market.price.observed.v1'>): Promise<void> {
+    return this.positions.price(event);
+  }
   async history(at: number): Promise<MarketHistory> {
     const cached = await this.cache.get<MarketHistory>(`history:${at}`);
     if (cached) return cached;

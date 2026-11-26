@@ -4,10 +4,12 @@ import { Candle, Timeframe } from '../domain/model';
 export const INTERVAL_MS: Record<Timeframe, number> = { '1m': 60000, '5m': 300000, '1h': 3600000 };
 @Injectable()
 export class PublicMarketClient {
+  private rateLimitedUntil = 0;
   // Market-data-only hosts. No SDK, API key, signature, or configurable private host.
   readonly restBase = 'https://data-api.binance.vision';
   readonly wsBase = 'wss://data-stream.binance.vision:443';
   async request(path: 'klines' | 'exchangeInfo', params: Record<string, string>): Promise<unknown> {
+    if (Date.now() < this.rateLimitedUntil) throw new Error('PUBLIC_RATE_LIMIT');
     if (!['klines', 'exchangeInfo'].includes(path)) throw new Error('PRIVATE_ENDPOINT_FORBIDDEN');
     if (
       Object.keys(params).some(
@@ -20,11 +22,15 @@ export class PublicMarketClient {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) });
-        if (response.status === 418 || response.status === 429)
+        if (response.status === 418 || response.status === 429) {
+          const retryAfter = Number(response.headers.get('Retry-After'));
+          this.rateLimitedUntil = Date.now() + (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 60) * 1000;
           throw new Error('PUBLIC_RATE_LIMIT');
+        }
         if (!response.ok) throw new Error(`PUBLIC_HTTP_${response.status}`);
         return await response.json();
       } catch (e) {
+        if (Date.now() < this.rateLimitedUntil) throw e;
         last = e;
         if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
       }

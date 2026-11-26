@@ -23,6 +23,7 @@ import { shouldPublishSignal } from '../strategy/signal-cadence';
 import { v5RecoverySummary } from '../risk/v5-recovery';
 import { BTC_V5_FIVE_MINUTE_HISTORY } from '../strategy/btc-v5.config';
 import { validV6Parameters } from '../strategy/btc-v6.config';
+import { PriceObservation, validDynamicTakeProfit } from '../execution/dynamic-take-profit';
 
 export interface BacktestOptions {
   strategy: StrategyId;
@@ -121,7 +122,8 @@ export class BacktestingEngine {
     private readonly paper = new PaperExecutionAdapter(),
     private readonly risk = new RiskPolicy(),
   ) {}
-  run(input: Candle[], options: BacktestOptions, tradeStart?: number, tradeEnd?: number) {
+  run(input: Candle[], options: BacktestOptions, tradeStart?: number, tradeEnd?: number,
+    priceObservations?: PriceObservation[]) {
     if (
       !['legacy-v1', 'btc-v2','btc-v3','btc-v4','btc-v5','btc-v6','trend-reference'].includes(options.strategy) ||
       !Number.isFinite(options.initialCapital) ||
@@ -166,6 +168,15 @@ export class BacktestingEngine {
       || (config.buyCommissionAsset !== undefined && !['BTC','USDT'].includes(config.buyCommissionAsset))
     )
       throw new Error('INVALID_SIMULATION_CONFIG');
+    if (config.v6DynamicTakeProfit && !validDynamicTakeProfit(config.v6DynamicTakeProfit))
+      throw new Error('INVALID_DYNAMIC_TAKE_PROFIT_CONFIG');
+    if (options.strategy === 'btc-v6' && config.v6DynamicTakeProfit && !priceObservations?.length)
+      throw new Error('DYNAMIC_TP_REQUIRES_PRICE_OBSERVATIONS');
+    if (priceObservations?.some((o, i) => o.symbol !== 'BTCUSDT' || !Number.isSafeInteger(o.at) ||
+      !new Decimal(o.price).isFinite() || new Decimal(o.price).lte(0) ||
+      (i > 0 && o.at <= priceObservations[i - 1].at)))
+      throw new Error('INVALID_PRICE_OBSERVATIONS');
+    let observationIndex = 0;
     const state = newAccount(
       'backtest',
       'backtest',
@@ -213,6 +224,13 @@ export class BacktestingEngine {
         }
       }
       pending = null;
+      // Replay actual sampled observations in order, before evaluating this candle close.
+      // Missing observations never become synthetic OHLC fills for dynamic positions.
+      while (priceObservations && observationIndex < priceObservations.length &&
+        priceObservations[observationIndex].at <= c.closeTime) {
+        const observation = priceObservations[observationIndex++];
+        if (trading && observation.at >= c.openTime) this.paper.onPrice(state, observation, budget);
+      }
       // Only prior higher timeframe bars can invalidate a position during the current candle.
       if (trading) this.paper.onCandle(state, c, this.strategy.invalidated(history),()=>true,budget);
       for (const bar of [c, ...aggregator.push(c)]) {
@@ -249,6 +267,11 @@ export class BacktestingEngine {
       },
       options: { ...options, config },
       datasetHash: createHash('sha256').update(JSON.stringify(candles)).digest('hex'),
+      ...(priceObservations ? {
+        priceObservationsHash: createHash('sha256').update(JSON.stringify(priceObservations)).digest('hex'),
+        priceObservationCount: priceObservations.length,
+        dynamicExitPolicy: 'sampled prices in timestamp order; prior-minute shared liquidity; no fills inferred from OHLC; no forced final liquidation',
+      } : {}),
       firstTime: candles[0].openTime,
       lastTime: last.closeTime,
       tradeStart,

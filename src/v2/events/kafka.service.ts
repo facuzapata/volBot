@@ -7,7 +7,7 @@ import {
   SignalDispatcherService,
   StrategyServiceV2,
 } from '../trading/trading.services';
-import { NotificationServiceV2 } from '../notifications/notification.service';
+import { NotificationServiceV2, TelegramDeliveryError } from '../notifications/notification.service';
 import { DomainEvent, Topic, TOPICS } from './contracts';
 
 @Injectable()
@@ -65,7 +65,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         retry: { retries: 5 },
       });
       await this.producer.connect();
-      for (const group of ['trading', 'notifications']) {
+      for (const group of ['trading', 'notifications', 'price-exits']) {
         const consumer = this.kafka.consumer({
           groupId: `${this.namespace || 'volbot-v2'}-${group}`,
           sessionTimeout: 60000,
@@ -74,7 +74,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         this.consumers.push(consumer);
         await consumer.connect();
         const topics: Topic[] =
-          group === 'notifications'
+          group === 'price-exits' ? ['market.price.observed.v1'] : group === 'notifications'
             ? ['notification.requested.v1']
             : ['market.candle.closed.v1', 'strategy.signal.created.v1', 'execution.command.v1'];
         await consumer.subscribe({ topics: topics.map((t) => this.wire(t)), fromBeginning: true });
@@ -147,6 +147,9 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       }
       try {
         switch (event.topic) {
+          case 'market.price.observed.v1':
+            await this.strategy.price(event as DomainEvent<'market.price.observed.v1'>);
+            break;
           case 'market.candle.closed.v1':
             await this.strategy.candle(event as DomainEvent<'market.candle.closed.v1'>);
             break;
@@ -161,7 +164,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
             break;
         }
         return;
-      } catch {
+      } catch (error) {
         const attempts = (row?.attempts || 0) + 1;
         await this.store.db.transaction(async (tx) => {
           await tx.upsert(
@@ -170,7 +173,10 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
               id,
               attempts,
               dead: attempts >= 5,
-              nextAttemptAt: new Date(Date.now() + Math.min(30000, 500 * 2 ** attempts)),
+              nextAttemptAt: new Date(Date.now() + Math.max(
+                Math.min(30000, 500 * 2 ** attempts),
+                error instanceof TelegramDeliveryError ? error.retryAfterMs : 0,
+              )),
             },
             ['id'],
           );

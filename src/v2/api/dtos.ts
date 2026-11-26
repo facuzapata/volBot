@@ -306,6 +306,15 @@ export class MarketStatusDto extends HealthDto {
   })
   intervals!: object;
 }
+export class TelegramStatusDto {
+  @ApiProperty() enabled!: boolean;
+  @ApiProperty() botConfigured!: boolean;
+  @ApiProperty() chatLinked!: boolean;
+  @ApiProperty({ description: 'Configuration readiness only; not confirmation of Telegram delivery.' }) ready!: boolean;
+}
+export class NotificationStatusDto {
+  @ApiProperty({ type: TelegramStatusDto }) telegram!: TelegramStatusDto;
+}
 export class PositionDto extends RecordDto {
   @ApiProperty() accountId!: string;
   @ApiProperty() signalId!: string;
@@ -322,6 +331,9 @@ export class PositionDto extends RecordDto {
   @ApiProperty() stopLoss!: string;
   @ApiProperty() takeProfit!: string;
   @ApiProperty() highWater!: string;
+  @ApiPropertyOptional({ type: 'object', additionalProperties: true,
+    description: 'Versioned V6 PAPER dynamic exit state. originalTarget is an immutable execution-price floor; an order may remain pending.' })
+  dynamicTakeProfit?: object;
   @ApiProperty() atr!: string;
   @ApiProperty() openedAt!: number;
   @ApiPropertyOptional() closedAt?: number;

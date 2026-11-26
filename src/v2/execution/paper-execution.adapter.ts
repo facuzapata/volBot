@@ -14,6 +14,7 @@ import {
 import { causalLiquidity, remainingLiquidity } from './causal-liquidity';
 import { executionPrice } from './pricing';
 import { assessExecutionRisk } from '../risk/execution-risk';
+import { observeDynamicPrice, PriceObservation } from './dynamic-take-profit';
 
 const d = (n: Decimal.Value) => new Decimal(n);
 const str = (n: Decimal.Value) => d(n).toFixed(12);
@@ -78,6 +79,12 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
     if (!o || !isOrderOpen(o) || o.status === 'UNKNOWN' || at < o.createdAt) return;
     const p = s.positions.find((x) => x.id === o.positionId)!;
     const c = p.config;
+    if (o.reason === 'DYNAMIC_TAKE_PROFIT' &&
+      (!p.dynamicTakeProfit || o.side !== 'SELL' || o.type !== 'LIMIT' ||
+        !o.limitPrice || d(o.limitPrice).lt(p.dynamicTakeProfit.originalTarget))) {
+      o.deferredReason = 'DYNAMIC_TARGET_FLOOR_VIOLATION';
+      return;
+    }
     if(o.side==='BUY'&&at-o.createdAt>c.signalMaxAgeMs){terminal(s,o,'REJECTED',at,'STALE_ENTRY');return;}
     if(![c.tickSize,c.stepSize,c.minQty].every(v=>Number.isFinite(v)&&v>0)||![c.feeRate,c.spreadBps,c.slippageBps].every(v=>Number.isFinite(v)&&v>=0)){
       if(o.side==='BUY')terminal(s,o,'REJECTED',at,'INVALID_EXECUTION_FILTERS');else o.deferredReason='INVALID_FILTERS_NEEDS_REVIEW';return;
@@ -95,6 +102,11 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
     )
       return;
     const price=executionPrice(referencePrice,o.side,c,o.type==='LIMIT'?o.limitPrice:undefined);
+    if (o.reason === 'DYNAMIC_TAKE_PROFIT' &&
+      executionPrice(referencePrice, 'SELL', c).lt(o.limitPrice!)) {
+      o.deferredReason = 'DYNAMIC_TARGET_NOT_MARKETABLE';
+      return;
+    }
     let qty = d(o.quantity).minus(o.filledQuantity);
     if (Number.isFinite(available)) qty = Decimal.min(qty, floor(available, c.stepSize));
     if (o.side === 'BUY')
@@ -218,6 +230,8 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
         p.closedAt = at;
         p.exitReason = o.reason;
       } else p.status = d(o.filledQuantity).gte(o.quantity) && (d(p.quantity).lt(c.minQty) || d(p.quantity).mul(price).lt(c.minNotional)) ? 'DUST' : 'CLOSING';
+      if (p.dynamicTakeProfit && p.status === 'CLOSED') p.dynamicTakeProfit.phase = 'CLOSED';
+      if (p.dynamicTakeProfit && p.status === 'DUST') p.dynamicTakeProfit.phase = 'DUST';
     }
     o.status = d(o.filledQuantity).gte(o.quantity) ? 'FILLED' : 'PARTIALLY_FILLED';
     delete o.deferredReason;
@@ -284,6 +298,34 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
     return o;
   }
 
+  /** Chronological observations only: never infer a reversal from OHLC extrema. */
+  onPrice(s: AccountState, observation: PriceObservation, liquidity: CausalLiquidityBudget | number): void {
+    if (observation.symbol !== 'BTCUSDT' || !Number.isSafeInteger(observation.at) ||
+      !new Decimal(observation.price).isFinite() || new Decimal(observation.price).lte(0)) return;
+    for (const p of s.positions.filter((p) => p.strategy === 'btc-v6' && isTargetOnlyPosition(p) &&
+      p.dynamicTakeProfit && isPositionOpen(p) && p.status !== 'DUST' && d(p.quantity).gt(0))) {
+      if (observation.at <= p.openedAt) continue;
+      const tracking = p.dynamicTakeProfit!;
+      const pending = s.orders.find((o) => o.positionId === p.id && o.side === 'SELL' && isOrderOpen(o));
+      // A manual exit owns the inventory until it completes or is cancelled.
+      if (pending && pending.reason !== 'DYNAMIC_TAKE_PROFIT') continue;
+      if (!observeDynamicPrice(tracking, observation, p.config.tickSize,
+        p.config.spreadBps + 2 * p.config.slippageBps)) continue;
+      const floorPrice = d(tracking.originalTarget).div(p.config.tickSize).ceil().mul(p.config.tickSize);
+      const exit = pending ?? this.requestExit(s, p.id, observation.at, 'DYNAMIC_TAKE_PROFIT', 'LIMIT', floorPrice.toNumber());
+      if (!exit) {
+        if (String(p.status) === 'DUST') tracking.phase = 'DUST';
+        continue;
+      }
+      tracking.phase = 'SELL_ORDER_PENDING';
+      tracking.exitRequestedAt ??= observation.at;
+      // The floor is retained even if this observation has already fallen below it.
+      this.execute(s, exit.id, Number(observation.price), observation.at, liquidity, 'DECISION');
+      if (String(p.status) === 'CLOSED') tracking.phase = 'CLOSED';
+      if (String(p.status) === 'DUST') tracking.phase = 'DUST';
+    }
+  }
+
   onCandle(s: AccountState, candle: Candle, invalidate = false, allowEntryFills: (positionId: string) => boolean = () => true, sharedBudget?:CausalLiquidityBudget): void {
     if (candle.timeframe !== '1m' || candle.closeTime <= s.account.lastCandleTime) return;
     s.account.lastCandleTime = candle.closeTime;
@@ -310,11 +352,13 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
           this.execute(s, order.id, candle.open, candle.openTime, budget,'OPEN');
         }
       }
+      const dynamic = p.strategy === 'btc-v6' && targetOnly && !!p.dynamicTakeProfit;
       const sellPending = s.orders.find(
-        (o) => o.positionId === p.id && o.side === 'SELL' && isOrderOpen(o),
+        (o) => o.positionId === p.id && o.side === 'SELL' && isOrderOpen(o) &&
+          (!dynamic || o.reason !== 'DYNAMIC_TAKE_PROFIT'),
       );
       const stopHit = !targetOnly && d(p.quantity).gt(0) && candle.low <= Number(p.stopLoss);
-      const takeHit = d(p.quantity).gt(0) && candle.high >= Number(p.takeProfit);
+      const takeHit = !dynamic && d(p.quantity).gt(0) && candle.high >= Number(p.takeProfit);
       let exit = sellPending;
       if (exit?.type === 'LIMIT' && stopHit) {
         this.cancel(s, exit.id, candle.closeTime);
@@ -323,7 +367,7 @@ export class PaperExecutionAdapter implements ExecutionAdapter {
       let price =
         sellPending && sellPending.createdAt > candle.openTime ? candle.close : candle.open;
       // Stop wins if OHLC cannot tell which boundary was touched first. Gaps use worse open.
-      const openingTakesProfit = d(p.quantity).gt(0) && candle.open >= Number(p.takeProfit);
+      const openingTakesProfit = !dynamic && d(p.quantity).gt(0) && candle.open >= Number(p.takeProfit);
       if (!exit && openingTakesProfit) {
         exit = this.requestExit(s, p.id, candle.closeTime, 'TAKE_PROFIT', 'LIMIT', Number(p.takeProfit));
         price = Number(p.takeProfit);

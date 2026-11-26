@@ -118,10 +118,29 @@ export class MarketDataService implements OnModuleInit, OnModuleDestroy {
       this.lastMessage = Date.now();
       try {
         const message = JSON.parse(raw.toString()) as {
-          data?: { s: string; k?: Record<string, unknown> };
+          data?: { s: string; E?: number; k?: Record<string, unknown> };
         };
         const k = message.data?.k;
-        if (!k || k.x !== true || message.data?.s !== 'BTCUSDT') return;
+        if (!k || message.data?.s !== 'BTCUSDT') return;
+        // One sampled last-trade price per 1m stream update. Never use k.h/k.l as ticks.
+        const at = message.data!.E;
+        if (k.i === '1m' && Number.isSafeInteger(at) && Number.isFinite(Number(k.c)) &&
+          Number(k.c) > 0 && Date.now() - at! >= 0 && Date.now() - at! <= 10000) {
+          const observation = { symbol: 'BTCUSDT' as const, at: at!, price: String(k.c) };
+          this.queue = this.queue.then(async () => {
+            // Do not emit delayed observations after backfill or a slow database.
+            if (Date.now() - observation.at > 10000) return;
+            await this.store.db.transaction(async (tx) => {
+              await this.store.emit(tx, 'market.price.observed.v1', 'BTCUSDT', observation,
+                `price:${observation.at}`, createHash('sha256').update(`kline-price:${observation.at}`).digest('hex'));
+            });
+          }).catch(() => {
+            this.ready = false;
+            this.lastError = 'PRICE_PROCESSING_FAILED';
+            this.socket?.terminate();
+          });
+        }
+        if (k.x !== true) return;
         const c: Candle = {
           symbol: 'BTCUSDT',
           timeframe: k.i as Timeframe,

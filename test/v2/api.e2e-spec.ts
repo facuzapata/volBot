@@ -93,6 +93,14 @@ describe('V2 HTTP contract with isolated persistence double', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(403);
   });
+  it('reports Telegram configuration without exposing secrets or sending messages', async () => {
+    await request(app.getHttpServer()).get('/api/me/notifications').expect(401);
+    const response = await request(app.getHttpServer()).get('/api/me/notifications')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(response.body.telegram).toMatchObject({ enabled: expect.any(Boolean), botConfigured: expect.any(Boolean), chatLinked: false, ready: false });
+    expect(response.body.telegram).not.toHaveProperty('token');
+    expect(response.body.telegram).not.toHaveProperty('chatId');
+  });
   it.each([false, true])('serializes all summary fields from existing history (trades: %s)', async (withHistory) => {
     const history = newAccount(state.account.id, user.id);
     if (withHistory) {

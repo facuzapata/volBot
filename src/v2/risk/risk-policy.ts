@@ -8,6 +8,7 @@ import {
   Position,
 } from '../domain/model';
 import { DEFAULT_BTC_V5 } from '../strategy/btc-v5.config';
+import { validDynamicTakeProfit } from '../execution/dynamic-take-profit';
 const d = (n: Decimal.Value) => new Decimal(n);
 const str = (n: Decimal.Value) => d(n).toFixed(12);
 const floor = (n: Decimal.Value, step: Decimal.Value) => d(n).div(step).floor().mul(step);
@@ -22,6 +23,8 @@ export class RiskPolicy {
     const existing = s.decisions.find((x) => x.id === decisionId);
     if (existing) return { accepted: existing.accepted, reason: existing.reason };
     const c = signal.config;
+    if (c.v6DynamicTakeProfit && !validDynamicTakeProfit(c.v6DynamicTakeProfit))
+      throw new Error('INVALID_DYNAMIC_TAKE_PROFIT_CONFIG');
     const targetOnly = signal.protection?.exitMode === 'TARGET_ONLY' &&
       ((signal.strategy === 'btc-v5' && c.btcV5?.exitMode === 'TARGET_ONLY') ||
         (signal.strategy === 'btc-v6' && c.btcV6?.exitMode === 'TARGET_ONLY')) &&
@@ -233,6 +236,12 @@ export class RiskPolicy {
     p.takeProfit = signal.protection
       ? str(signal.protection.targetPrice)
       : str(signal.referencePrice * (1 + (signal.strategy === 'legacy-v1' ? 0.005 : c.takeProfit)));
+    if (signal.strategy === 'btc-v6' && targetOnly && c.v6DynamicTakeProfit) {
+      p.dynamicTakeProfit = {
+        phase: 'WAITING_TARGET', originalTarget: p.takeProfit, peak: p.takeProfit,
+        noise: '0', retracement: '0', config: { ...c.v6DynamicTakeProfit },
+      };
+    }
     const o: ExchangeOrder = {
       id: `${id}:entry`,
       accountId: s.account.id,

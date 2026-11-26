@@ -61,6 +61,7 @@ import {
   MarketQueryDto,
   MarketStatusDto,
   NotificationSettingsDto,
+  NotificationStatusDto,
   OrderDto,
   OrdersPageDto,
   PositionDto,
@@ -152,6 +153,11 @@ export class AuthControllerV2 {
 @Controller('me')
 export class MeControllerV2 {
   constructor(private readonly api: ApiService) {}
+  @Get('notifications')
+  @Contract('Consultar configuración de Telegram sin exponer token ni chat', NotificationStatusDto)
+  notifications(@Req() req: AuthRequest) {
+    return this.api.notifications(req.user.id);
+  }
   @Get()
   @Contract('Consultar mi perfil público', PublicUserDto)
   profile(@Req() req: AuthRequest) {

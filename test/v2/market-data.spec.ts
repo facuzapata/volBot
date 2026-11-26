@@ -27,6 +27,20 @@ describe('MarketData reconnection and shutdown', () => {
   afterEach(() => {
     sockets.length = 0;
     jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+  it('respects REST Retry-After without retrying or issuing more requests during the cooldown', async () => {
+    jest.useFakeTimers();
+    const fetch = jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({ ok: false, status: 429, headers: new Headers({ 'Retry-After': '45' }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ symbols: [] }) } as Response);
+    const client = new PublicMarketClient();
+    await expect(client.request('exchangeInfo', { symbol: 'BTCUSDT' })).rejects.toThrow('PUBLIC_RATE_LIMIT');
+    await expect(client.request('exchangeInfo', { symbol: 'BTCUSDT' })).rejects.toThrow('PUBLIC_RATE_LIMIT');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(45001);
+    await expect(client.request('exchangeInfo', { symbol: 'BTCUSDT' })).resolves.toEqual({ symbols: [] });
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
   it('repairs the old 100-bar 5m seed using recovered history before resuming forward catch-up', async () => {
     const history = v5FifteenHistory()['5m'];
@@ -66,7 +80,9 @@ describe('MarketData reconnection and shutdown', () => {
     };
     const repo = { findOne: jest.fn().mockResolvedValue(null) };
     const store = {
-      db: { createQueryRunner: () => lease, getRepository: () => repo },
+      db: { createQueryRunner: () => lease, getRepository: () => repo,
+        transaction: async (action: (tx: object) => Promise<void>) => action({}) },
+      emit: jest.fn(),
     } as unknown as StoreService;
     const candles = jest.fn().mockResolvedValue([]);
     const client = {
@@ -85,11 +101,12 @@ describe('MarketData reconnection and shutdown', () => {
     const socket = sockets[0];
     socket.emit('open');
     const c = bar();
-    const message = (closed: boolean) =>
+    const message = (closed: boolean, eventTime?: number) =>
       Buffer.from(
         JSON.stringify({
           data: {
             s: 'BTCUSDT',
+            E: eventTime,
             k: {
               x: closed,
               i: '1m',
@@ -106,6 +123,11 @@ describe('MarketData reconnection and shutdown', () => {
       );
     socket.emit('message', message(false));
     for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(persist).not.toHaveBeenCalled();
+    socket.emit('message', message(false, Date.now()));
+    for (let i = 0; i < 15; i++) await Promise.resolve();
+    expect(store.emit).toHaveBeenCalledWith(expect.anything(), 'market.price.observed.v1', 'BTCUSDT',
+      { symbol: 'BTCUSDT', at: Date.now(), price: String(c.close) }, expect.any(String), expect.any(String));
     expect(persist).not.toHaveBeenCalled();
     socket.emit('message', message(true));
     for (let i = 0; i < 10; i++) await Promise.resolve();

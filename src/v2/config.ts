@@ -2,6 +2,7 @@ import { SimulationConfig, DEFAULT_SIMULATION, StrategyId } from './domain/model
 import { strategyConfiguration } from './strategy/versions';
 import { DEFAULT_BTC_V3 } from './strategy/btc-v3.config';
 import { validV3Parameters } from './strategy/btc-v3.strategy';
+import { DEFAULT_DYNAMIC_TAKE_PROFIT } from './execution/dynamic-take-profit';
 
 export function numberEnv(name: string, fallback: number, min: number, max: number): number {
   const value = Number(process.env[name] ?? fallback);
@@ -31,6 +32,13 @@ export function simulationConfig(): SimulationConfig {
   if (process.env.TRADING_MODE && process.env.TRADING_MODE !== 'PAPER')
     throw new Error('Only PAPER is supported');
   const c = { ...DEFAULT_SIMULATION };
+  if (process.env.V2_V6_DYNAMIC_TP_ENABLED === 'true') {
+    c.v6DynamicTakeProfit = {
+      ...DEFAULT_DYNAMIC_TAKE_PROFIT,
+      noiseHalfLifeMs: numberEnv('V2_V6_DYNAMIC_TP_NOISE_HALF_LIFE_MS', 30000, 1000, 300000),
+      noiseMultiplier: numberEnv('V2_V6_DYNAMIC_TP_NOISE_MULTIPLIER', 3, 1, 10),
+    };
+  }
   c.feeRate = numberEnv('V2_FEE_RATE', c.feeRate, 0, 0.01);
   c.spreadBps = numberEnv('V2_SPREAD_BPS', c.spreadBps, 0, 100);
   c.slippageBps = numberEnv('V2_SLIPPAGE_BPS', c.slippageBps, 0, 100);

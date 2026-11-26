@@ -130,6 +130,17 @@ export class StoreService {
       for (const p of state.positions.filter(
         (p) => JSON.stringify(p) !== JSON.stringify(before.positions.find((x) => x.id === p.id)),
       )) {
+        const previous = before.positions.find((x) => x.id === p.id);
+        if (p.dynamicTakeProfit?.activatedAt !== undefined && previous?.dynamicTakeProfit?.activatedAt === undefined)
+          await this.emit(tx, 'notification.requested.v1', state.account.userId, {
+            userId: state.account.userId, kind: 'DYNAMIC_TP_ACTIVATED',
+            text: `PAPER ${p.strategy} seguimiento dinámico activado; objetivo mínimo ${p.dynamicTakeProfit.originalTarget} USDT; posición ${p.id}`,
+          }, p.signalId, `${p.id}:dynamic-tp-activated`);
+        if (p.dynamicTakeProfit?.exitRequestedAt !== undefined && previous?.dynamicTakeProfit?.exitRequestedAt === undefined)
+          await this.emit(tx, 'notification.requested.v1', state.account.userId, {
+            userId: state.account.userId, kind: 'DYNAMIC_TP_EXIT_REQUESTED',
+            text: `PAPER ${p.strategy} venta LIMIT solicitada; piso ${p.dynamicTakeProfit.originalTarget} USDT; máximo observado ${p.dynamicTakeProfit.peak} USDT. Pendiente hasta ejecución; posición ${p.id}`,
+          }, p.signalId, `${p.id}:dynamic-tp-exit-requested`);
         await this.emit(
           tx,
           'position.updated.v1',
@@ -161,7 +172,7 @@ export class StoreService {
           {
             userId: state.account.userId,
             kind: `SIMULATED_${f.side}`,
-            text: `PAPER ${f.side} BTCUSDT ${f.quantity} @ ${f.price}; comisión ${f.commission} USDT`,
+            text: `PAPER ${f.side} BTCUSDT ${f.quantity} @ ${f.price}; importe ${f.quote} USDT; comisión ${f.commission} ${f.commissionAsset ?? 'USDT'}`,
           },
           f.orderId,
         );

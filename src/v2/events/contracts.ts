@@ -1,6 +1,8 @@
 import { Candle, MarketSignal } from '../domain/model';
+import { PriceObservation } from '../execution/dynamic-take-profit';
 
 export interface Payloads {
+  'market.price.observed.v1': PriceObservation;
   'market.candle.closed.v1': { candle: Candle; recovered: boolean };
   'strategy.signal.created.v1': { signal: MarketSignal };
   'execution.command.v1': { accountId: string; orderId: string; signalTime: number; price: number };
@@ -10,6 +12,7 @@ export interface Payloads {
 }
 export type Topic = keyof Payloads;
 export const TOPICS: Topic[] = [
+  'market.price.observed.v1',
   'market.candle.closed.v1',
   'strategy.signal.created.v1',
   'execution.command.v1',
