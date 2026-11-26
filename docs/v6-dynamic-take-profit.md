@@ -126,9 +126,71 @@ y cada hora; su clave de cuenta/día evita repetir resúmenes ya procesados.
 No incluye automáticamente todos los días anteriores a una interrupción larga.
 Los fallos agotados se conservan en dead letters para revisión/reintento.
 
-En esta sesión, `.env.v2` local tiene Telegram apagado y sin token. No se
-enviaron mensajes reales ni se cambió la configuración del servidor. Esa
-comprobación local no determina la configuración remota.
+Durante la entrega inicial, `.env.v2` local tenía Telegram apagado y sin token.
+Posteriormente se validó y reutilizó la configuración del `.env` anterior en
+el entorno local; esos secretos siguen fuera de Git. La configuración del
+servidor depende de sus propias variables de entorno.
+
+## Consultas desde Telegram
+
+El worker recibe comandos con long polling (`getUpdates`) usando el mismo bot.
+No necesita puerto público ni webhook. Se habilita cuando Telegram está activo;
+`V2_TELEGRAM_COMMANDS_ENABLED=false` permite apagar solamente las consultas.
+
+| Comando | Respuesta |
+|---|---|
+| `/abiertas` | BTC restante, importe comprado, entrada media, objetivo y qué falta para salir |
+| `/ordenes` | Compras y ventas pendientes, parciales o con estado desconocido |
+| `/btc` | Último cierre BTC/USDT de 1m persistido, con hora y aviso si está desactualizado |
+| `/resumen` | Saldo, ticket configurado, inventario BTC, cierres y P&L |
+| `/ayuda` o `/start` | Menú; si falta vincular, muestra el ID del propio chat |
+
+`/posiciones`, `/senales`, `/signals` y `/signas` son alias de `/abiertas`.
+`/estado` y `/precio` son alias de `/resumen` y `/btc`. Se admite el sufijo
+`@nombre_del_bot`. Las listas tienen páginas: `/abiertas 2`, `/ordenes 2`.
+No se registran botones de menú en Telegram automáticamente: el usuario puede
+escribir `/ayuda`. Ningún comando compra, vende, cancela ni cambia límites.
+
+Las consultas financieras sólo funcionan en un chat privado cuyo remitente
+coincide con ese chat y que está vinculado a una única cuenta activa. Grupos,
+canales, bots y comandos dirigidos a otro bot se ignoran. Si hay cero o varias
+cuentas vinculadas, sólo se devuelve ayuda para vincular, sin datos de cuentas.
+No se aceptan identificadores de otras cuentas como argumentos. Cada respuesta
+privada se vuelve a validar contra su usuario al entregar, por si se desvinculó
+el chat mientras el mensaje esperaba en Kafka.
+
+El receptor obtiene un advisory lock PostgreSQL por bot para evitar lectores
+duplicados entre workers. Si Telegram ya tiene un webhook configurado, no lo
+borra: informa `TELEGRAM_WEBHOOK_ALREADY_CONFIGURED` y no inicia polling.
+Otro proceso ajeno leyendo el mismo bot puede provocar
+`TELEGRAM_POLL_CONFLICT`; debe mantenerse un único receptor por bot.
+
+El recibo del update y la respuesta en outbox se confirman juntos. El próximo
+poll sólo confirma el offset después del commit. El cursor se recupera desde
+inbox al reiniciar; tras un período prolongado sin updates se omite el offset
+viejo, porque Telegram puede aleatorizar el identificador después de una semana.
+No se limpia la cola de Telegram al arrancar. Los reintentos respetan la pausa
+de Telegram y nunca registran URLs con tokens. Las respuestas usan un consumidor
+`telegram-replies` separado de los avisos de trading, para que sus reintentos no
+bloqueen el consumidor de notificaciones de compras y cierres.
+
+Las respuestas muestran información al momento de la consulta, no una conexión
+de precios en vivo. Un bot habilitado y con token no demuestra que el receptor
+esté conectado: verificar el log `telegram_commands_started` del worker.
+
+Prueba HTTP local, usando sólo tokens y chats ficticios:
+
+```powershell
+postman simulation run postman/simulations/telegram-commands.sim.yaml --port 4017 --no-history --output ndjson
+# En otra terminal:
+$env:TELEGRAM_SIMULATION_ORIGIN='http://127.0.0.1:4017/telegram'
+npm.cmd test -- --runTestsByPath test/v2/telegram-http.integration-spec.ts
+```
+
+La simulación prueba el cliente HTTP y los servicios reales con dobles de
+persistencia; no sustituye una prueba con PostgreSQL/Kafka reales ni con el bot
+desplegado. El contexto conserva los límites en
+`postman/simulations/telegram-commands.context.yaml`.
 
 ## Entrega
 

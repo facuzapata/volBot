@@ -30,6 +30,8 @@ import { AuthGuardV2, jwtSecret } from './api/auth';
 import { RiskPolicy } from './risk/risk-policy';
 import { StrategyApprovalService } from './strategy/approval.service';
 import { BinanceCredentialsService } from './execution/binance-credentials.service';
+import { TelegramClient } from './notifications/telegram.client';
+import { TelegramCommandsService } from './notifications/telegram-commands.service';
 
 @Module({
   imports: [
@@ -107,7 +109,8 @@ export class StrategyModuleV2 {}
 export class MarketDataModule {}
 @Module({
   imports: [CoreModule],
-  providers: [NotificationServiceV2],
+  providers: [NotificationServiceV2, TelegramCommandsService,
+    { provide: TelegramClient, useFactory: () => new TelegramClient() }],
   exports: [NotificationServiceV2],
 })
 export class NotificationModule {}

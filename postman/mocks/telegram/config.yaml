@@ -1,0 +1,11 @@
+version: 1
+name: Telegram command dependency
+slug: telegram
+protocol: http
+port: 4500
+origin: api.telegram.org
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

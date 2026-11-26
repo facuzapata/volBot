@@ -9,6 +9,7 @@ export interface Payloads {
   'execution.order.updated.v1': { accountId: string; orderId: string; status: string };
   'position.updated.v1': { accountId: string; positionId: string; status: string; netPnl: string };
   'notification.requested.v1': { userId: string; kind: string; text: string };
+  'telegram.reply.requested.v1': { chatId: string; userId?: string; kind: 'ACCOUNT_QUERY' | 'HELP'; text: string };
 }
 export type Topic = keyof Payloads;
 export const TOPICS: Topic[] = [
@@ -19,6 +20,7 @@ export const TOPICS: Topic[] = [
   'execution.order.updated.v1',
   'position.updated.v1',
   'notification.requested.v1',
+  'telegram.reply.requested.v1',
 ];
 export interface DomainEvent<T extends Topic = Topic> {
   eventId: string;

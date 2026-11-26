@@ -10,10 +10,18 @@ Envelope: `eventId`, `schemaVersion: 1`, `topic`, `key`, `occurredAt` ISO UTC, `
 | execution.order.updated.v1 | accountId | orderId, status |
 | position.updated.v1 | accountId | positionId, status, netPnl |
 | notification.requested.v1 | userId | userId, kind, text |
+| market.price.observed.v1 | BTCUSDT | symbol, at, price; observación intravela muestreada |
+| telegram.reply.requested.v1 | chatId | chatId, userId opcional, kind (HELP o ACCOUNT_QUERY), text |
 
 Tres particiones por topic; una réplica en el entorno local. Groups: `volbot-v2-trading` y `volbot-v2-notifications`. KafkaJS usa productor idempotente, `acks=-1` y una petición en vuelo.
 
 `V2_KAFKA_NAMESPACE` es opcional y se usa para aislar suites de integración: prefija topics y groups, manteniendo el nombre lógico del contrato dentro del envelope. No se configura en la simulación habitual.
+
+Las salidas dinámicas usan el group `volbot-v2-price-exits`. Las respuestas a
+comandos Telegram usan `volbot-v2-telegram-replies`, separado del group de avisos
+de trading. Los payloads de respuesta pueden contener datos privados de la
+cuenta; se revalida la vinculación chat/usuario antes de entregarlos. No son
+topics destinados a consumo público del frontend.
 
 ## Recuperación
 

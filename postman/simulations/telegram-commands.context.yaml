@@ -1,0 +1,37 @@
+purpose:
+  stands_in_for: Telegram Bot API getMe, getWebhookInfo, getUpdates and sendMessage, with synthetic token and chats only.
+  unblocks: Testing read-only account commands, private-chat routing, polling offsets and HTTP error handling without contacting Telegram.
+assumptions:
+  - id: local-command-pipeline
+    status: supported
+    claim: In the exercised local scenario, the receiver creates one account-scoped reply, the sender sends it to chat 111 and the next poll acknowledges the committed update.
+    reason: The real client, receiver and notification service ran against the HTTP stand-in; persistence and outbox delivery were explicit in-memory doubles.
+    verification: Seven HTTP simulation tests passed on 2026-11-26. The simulation logged getMe, getWebhookInfo, getUpdates and sendMessage; response text contained only the selected account's position and the next offset was 41. Real PostgreSQL and Kafka were not exercised by this run.
+    source: test/v2/telegram-http.integration-spec.ts; test/v2/telegram-command.fixtures.ts; src/v2/notifications/telegram-commands.service.ts
+    updated_at: '2026-11-26'
+  - id: polling-contract
+    status: supported
+    claim: Telegram getUpdates accepts an offset that confirms previous updates and cannot be used while a webhook is configured.
+    reason: These behaviors are specified in the official Bot API contract and are modeled by the stand-in.
+    verification: Read official documentation on 2026-11-26; local HTTP tests demonstrated offset acknowledgement and refusal to poll a bot with a configured webhook. No production bot queue was read or modified.
+    source: https://core.telegram.org/bots/api#getupdates; https://core.telegram.org/bots/api#getwebhookinfo
+    updated_at: '2026-11-26'
+  - id: bounded-failure-handling
+    status: supported
+    claim: In the tested HTTP scenarios, 401, 409, 429, HTML gateway errors and a delayed response produce sanitized caller failures; a second request during retry_after is not sent.
+    reason: Native fetch exercised serialization, JSON error parsing, timeout and cooldown handling through the local Postman server.
+    verification: Seven local integration cases passed. Request logs contained one getUpdates call for the rate-limit case; exceptions did not include the synthetic credential. This does not establish real provider availability or request timing.
+    source: src/v2/notifications/telegram.client.ts; postman/mocks/telegram/default.js; test/v2/telegram-http.integration-spec.ts
+    updated_at: '2026-11-26'
+  - id: production-delivery
+    status: unknown
+    claim: The deployed bot can poll updates and deliver command replies using the production account mapping and worker environment.
+    reason: No deployed receiver was started and no real Telegram command or message was sent during this implementation. The existing bot may have another reader or a webhook.
+    verification: Pending deployment, confirmation of telegram_commands_started and an actual private /abiertas command. Existing sender-only Telegram verification predates this command receiver and does not establish it works remotely.
+    source: docs/v6-dynamic-take-profit.md; src/v2/notifications/telegram-commands.service.ts
+    updated_at: '2026-11-26'
+fingerprints:
+  - id: initial-local-run
+    date: '2026-11-26'
+    commit: based-on-65243ff
+    cli: Postman CLI 1.77.0; one-port local simulation. CLI status command unavailable, so hosted owner-mock discovery was skipped. Mock authored from official Telegram documentation. Custom client origin used only by local tests; production factory uses api.telegram.org.

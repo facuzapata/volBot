@@ -1,5 +1,5 @@
 import { DomainEvent } from '../../src/v2/events/contracts';
-import { NotificationServiceV2, TelegramDeliveryError, telegramStatus } from '../../src/v2/notifications/notification.service';
+import { NotificationServiceV2, telegramStatus } from '../../src/v2/notifications/notification.service';
 import { StoreService } from '../../src/v2/persistence/store.service';
 import { newAccount } from '../../src/v2/execution/paper-execution.adapter';
 
@@ -66,7 +66,7 @@ describe('Telegram configuration and delivery', () => {
   it('carries Telegram retry_after to the delivery scheduler', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false,
       json: async () => ({ ok: false, parameters: { retry_after: 45 } }) } as Response);
-    await expect(service().notifications.deliver(event)).rejects.toMatchObject<TelegramDeliveryError>({
+    await expect(service().notifications.deliver(event)).rejects.toMatchObject({
       name: 'Error', message: 'TELEGRAM_DELIVERY_FAILED', retryAfterMs: 45000,
     });
   });

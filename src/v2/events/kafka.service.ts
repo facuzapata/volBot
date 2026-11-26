@@ -65,7 +65,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         retry: { retries: 5 },
       });
       await this.producer.connect();
-      for (const group of ['trading', 'notifications', 'price-exits']) {
+      for (const group of ['trading', 'notifications', 'price-exits', 'telegram-replies']) {
         const consumer = this.kafka.consumer({
           groupId: `${this.namespace || 'volbot-v2'}-${group}`,
           sessionTimeout: 60000,
@@ -74,8 +74,9 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         this.consumers.push(consumer);
         await consumer.connect();
         const topics: Topic[] =
-          group === 'price-exits' ? ['market.price.observed.v1'] : group === 'notifications'
-            ? ['notification.requested.v1']
+          group === 'price-exits' ? ['market.price.observed.v1'] : group === 'telegram-replies'
+            ? ['telegram.reply.requested.v1'] : group === 'notifications'
+              ? ['notification.requested.v1']
             : ['market.candle.closed.v1', 'strategy.signal.created.v1', 'execution.command.v1'];
         await consumer.subscribe({ topics: topics.map((t) => this.wire(t)), fromBeginning: true });
         await consumer.run({
@@ -161,6 +162,9 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
             break;
           case 'notification.requested.v1':
             await this.notifications.deliver(event as DomainEvent<'notification.requested.v1'>);
+            break;
+          case 'telegram.reply.requested.v1':
+            await this.notifications.reply(event as DomainEvent<'telegram.reply.requested.v1'>);
             break;
         }
         return;
