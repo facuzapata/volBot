@@ -88,13 +88,48 @@ describe('Read-only Telegram commands and account isolation', () => {
       config: { revision: 'v6-dtp-2026-11-26.1', noiseHalfLifeMs: 30000, noiseMultiplier: 3, maxObservationAgeMs: 10000 } };
     expect(telegramAccountReply('abiertas', 1, state, null)).toContain('siguiendo máximo 100800.00');
     state.orders.push({ ...state.orders[0], id: 'sell', side: 'SELL', status: 'PARTIALLY_FILLED', type: 'LIMIT', limitPrice: '100400' });
-    expect(telegramAccountReply('abiertas', 1, state, null)).toContain('Venta PARTIALLY_FILLED');
+    expect(telegramAccountReply('abiertas', 1, state, null)).toContain('Venta Parcialmente ejecutada');
     expect(telegramAccountReply('ordenes', 1, state, null)).toContain('VENTA');
   });
   it('labels missing and stale market prices instead of inventing a current quote', () => {
     expect(telegramAccountReply('btc', 1, null, null)).toContain('no disponible');
     const h = commandHarness();
     expect(telegramAccountReply('btc', 1, null, h.latest.data, h.latest.data.closeTime + 180001)).toContain('desactualizado');
+  });
+  it('formats account sections and escapes account data before sending HTML', async () => {
+    const h = commandHarness(), state = h.states.get('a-0')!;
+    const summary = telegramAccountReply('resumen', 1, state, h.latest.data);
+    expect(summary).toContain('<b>Saldos</b>');
+    expect(summary).toContain('<b>Resultados</b>');
+    expect(summary).toContain('<code>');
+    Object.assign(state.positions[0], { strategy: '<b>strategy</b> & test' });
+    await new TelegramCommandsService(h.store, new TelegramClient()).handleUpdate(commandBot, commandUpdate('/abiertas'));
+    expect(h.emitted[0].payload.parseMode).toBe('HTML');
+    expect(h.emitted[0].payload.text).toContain('&lt;b&gt;strategy&lt;/b&gt; &amp; test');
+    const send = jest.spyOn(TelegramClient.prototype, 'send').mockResolvedValue({});
+    const old = process.env.V2_TELEGRAM_ENABLED;
+    process.env.V2_TELEGRAM_ENABLED = 'true';
+    try { await new NotificationServiceV2(h.store).reply(h.emitted[0]); }
+    finally { if (old === undefined) delete process.env.V2_TELEGRAM_ENABLED; else process.env.V2_TELEGRAM_ENABLED = old; }
+    expect(send).toHaveBeenCalledWith('111', h.emitted[0].payload.text, 'HTML');
+  });
+  it('shows order fill progress and keeps long HTML replies valid in each chunk', () => {
+    const h = commandHarness(), state = h.states.get('a-0')!;
+    state.orders[0] = { ...state.orders[0], status: 'PARTIALLY_FILLED', quantity: '0.001', filledQuantity: '0.0005', reason: 'A < B & C' };
+    const orders = telegramAccountReply('ordenes', 1, state, null);
+    expect(orders).toContain('50.0%');
+    expect(orders).toContain('Parcialmente ejecutada');
+    expect(orders).toContain('A &lt; B &amp; C');
+    const content = '🟢 &amp; '.repeat(1500);
+    const chunks = splitTelegramReply(`<b><code>${content}</code></b>`);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(3800);
+      expect(chunk).toMatch(/^<b><code>[\s\S]*<\/code><\/b>$/);
+      expect(chunk.replace(/&amp;/g, '')).not.toContain('&');
+      expect(chunk).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
+    }
+    expect(chunks.map((chunk) => chunk.replace(/<\/?(?:b|code)>/g, '')).join('')).toBe(content);
   });
   it('paginates long histories and keeps reply chunks below Telegram message limits', () => {
     const h = commandHarness(), state = h.states.get('a-0')!, first = state.positions[0];

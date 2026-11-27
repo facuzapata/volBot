@@ -2,6 +2,13 @@ purpose:
   stands_in_for: Telegram Bot API getMe, getWebhookInfo, getUpdates and sendMessage, with synthetic token and chats only.
   unblocks: Testing read-only account commands, private-chat routing, polling offsets and HTTP error handling without contacting Telegram.
 assumptions:
+  - id: html-command-delivery
+    status: supported
+    claim: New command replies carry parse_mode HTML through the outbox and native HTTP client in the exercised local scenario; older plain-text events remain supported.
+    reason: The local Postman stand-in recorded sendMessage with parse_mode HTML and bold markup, and unit tests verified escaping, balanced message chunks and plain-text notification delivery. The official Bot API documents HTML formatting and escaping.
+    verification: On 2026-11-27, 40 tests passed across telegram-commands, telegram-notifications and telegram-http.integration-spec. The simulation log included getMe, getWebhookInfo, getUpdates and sendMessage (200). The stand-in records formatting metadata but does not render it or validate Telegram HTML. No real Telegram message was sent; visual rendering in the app remains unverified.
+    source: https://core.telegram.org/bots/api#html-style; test/v2/telegram-http.integration-spec.ts; test/v2/telegram-commands.spec.ts; test/v2/telegram-notifications.spec.ts; postman/mocks/telegram/default.js
+    updated_at: '2026-11-27'
   - id: local-command-pipeline
     status: supported
     claim: In the exercised local scenario, the receiver creates one account-scoped reply, the sender sends it to chat 111 and the next poll acknowledges the committed update.
@@ -31,6 +38,10 @@ assumptions:
     source: docs/v6-dynamic-take-profit.md; src/v2/notifications/telegram-commands.service.ts
     updated_at: '2026-11-26'
 fingerprints:
+  - id: html-command-local-run
+    date: '2026-11-27'
+    commit: fe402fb8a3106cdcb107c2790d153e44ded5f2b3 with uncommitted Telegram formatting changes and pre-existing unrelated historical-range changes
+    cli: Postman CLI 1.77.0; existing repository mock reused on port 4017. No hosted discovery or production calls. Mock originally authored from official Telegram documentation.
   - id: initial-local-run
     date: '2026-11-26'
     commit: based-on-65243ff

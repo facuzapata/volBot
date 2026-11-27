@@ -148,7 +148,7 @@ export class TelegramCommandsService implements OnModuleInit, OnModuleDestroy {
         const replyId = `telegram-reply:${bot.id}:${receipt}`;
         for (const [index, chunk] of splitTelegramReply(text).entries()) {
           await this.store.emit(tx, 'telegram.reply.requested.v1', chatId,
-            { chatId, userId: kind === 'ACCOUNT_QUERY' ? owner!.id : undefined, kind, text: chunk },
+            { chatId, userId: kind === 'ACCOUNT_QUERY' ? owner!.id : undefined, kind, text: chunk, parseMode: 'HTML' },
             replyId, `${replyId}:${index}`);
         }
       });

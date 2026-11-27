@@ -15,7 +15,7 @@ suite('Telegram command pipeline against a local HTTP simulation (no real Telegr
     if (!response.ok) throw new Error('SIMULATION_CONTROL_FAILED');
   };
   const serverState = async () => (await (await fetch(`${url}/__state`)).json()) as {
-    messages: { chat_id: string; text: string }[]; requests: { method: string; body: { offset?: number } }[];
+    messages: { chat_id: string; text: string; parse_mode?: string }[]; requests: { method: string; body: { offset?: number } }[];
   };
   beforeAll(() => {
     const endpoint = new URL(url);
@@ -48,6 +48,8 @@ suite('Telegram command pipeline against a local HTTP simulation (no real Telegr
       expect(state.messages).toHaveLength(1);
       expect(state.messages[0].chat_id).toBe('111');
       expect(state.messages[0].text).toContain('btc-v6');
+      expect(state.messages[0].parse_mode).toBe('HTML');
+      expect(state.messages[0].text).toContain('<b>');
       expect(state.messages[0].text).not.toContain('btc-v5');
       expect(state.requests.some((request) => request.method === 'getUpdates' && request.body.offset === 41)).toBe(true);
       expect(h.accountTransaction).not.toHaveBeenCalled();

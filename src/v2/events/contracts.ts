@@ -8,8 +8,8 @@ export interface Payloads {
   'execution.command.v1': { accountId: string; orderId: string; signalTime: number; price: number };
   'execution.order.updated.v1': { accountId: string; orderId: string; status: string };
   'position.updated.v1': { accountId: string; positionId: string; status: string; netPnl: string };
-  'notification.requested.v1': { userId: string; kind: string; text: string };
-  'telegram.reply.requested.v1': { chatId: string; userId?: string; kind: 'ACCOUNT_QUERY' | 'HELP'; text: string };
+  'notification.requested.v1': { userId: string; kind: string; text: string; parseMode?: 'HTML' };
+  'telegram.reply.requested.v1': { chatId: string; userId?: string; kind: 'ACCOUNT_QUERY' | 'HELP'; text: string; parseMode?: 'HTML' };
 }
 export type Topic = keyof Payloads;
 export const TOPICS: Topic[] = [

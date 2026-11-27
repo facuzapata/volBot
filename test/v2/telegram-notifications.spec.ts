@@ -63,6 +63,11 @@ describe('Telegram configuration and delivery', () => {
     await notifications.deliver(event);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+  it('passes HTML mode explicitly for formatted notifications', async () => {
+    const fetch = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as Response);
+    await service().notifications.deliver({ ...event, payload: { ...event.payload, text: '<b>Resumen</b>', parseMode: 'HTML' } });
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ chat_id: 'test-chat', text: '<b>Resumen</b>', parse_mode: 'HTML' });
+  });
   it('carries Telegram retry_after to the delivery scheduler', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false,
       json: async () => ({ ok: false, parameters: { retry_after: 45 } }) } as Response);
@@ -101,6 +106,9 @@ describe('Telegram configuration and delivery', () => {
     };
     await new NotificationServiceV2(store as unknown as StoreService).dailySummary();
     expect(emit).toHaveBeenCalledWith(tx, 'notification.requested.v1', 'u',
-      { userId: 'u', kind: 'DAILY_SUMMARY', text: 'PAPER resumen UTC 2026-11-25: 1 cierres, neto 0.5000 USDT' }, 'daily:2026-11-25');
+      { userId: 'u', kind: 'DAILY_SUMMARY', parseMode: 'HTML', text: expect.stringContaining('Resultado neto: <b>0.5000 USDT</b>') }, 'daily:2026-11-25');
+    const summary = emit.mock.calls[0][3].text as string;
+    expect(summary).toContain('2026-11-25 (UTC)');
+    expect(summary).toContain('Operaciones cerradas: <b>1</b>');
   });
 });

@@ -47,7 +47,7 @@ export class TelegramClient {
       throw new TelegramDeliveryError(0, signal?.aborted ? 'TELEGRAM_STOPPED' : 'TELEGRAM_NETWORK_ERROR');
     }
   }
-  send(chatId: string, text: string): Promise<unknown> {
-    return this.request('sendMessage', { chat_id: chatId, text });
+  send(chatId: string, text: string, parseMode?: 'HTML'): Promise<unknown> {
+    return this.request('sendMessage', { chat_id: chatId, text, ...(parseMode ? { parse_mode: parseMode } : {}) });
   }
 }

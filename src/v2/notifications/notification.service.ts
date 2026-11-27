@@ -3,6 +3,7 @@ import { DomainEvent } from '../events/contracts';
 import { StoreService } from '../persistence/store.service';
 import { V2User, VirtualAccountRow } from '../persistence/entities';
 import { TelegramClient } from './telegram.client';
+import { telegramLabel } from './telegram-format';
 export { TelegramDeliveryError } from './telegram.client';
 
 export function telegramStatus(user: Pick<V2User, 'active' | 'telegramChatId'>) {
@@ -28,7 +29,7 @@ export class NotificationServiceV2 {
         if (process.env.V2_TELEGRAM_ENABLED === 'true' && user.telegramChatId) {
           const token = process.env.V2_TELEGRAM_BOT_TOKEN?.trim();
           if (!token) throw new Error('TELEGRAM_NOT_CONFIGURED');
-          await this.telegram.send(user.telegramChatId, event.payload.text);
+          await this.telegram.send(user.telegramChatId, event.payload.text, event.payload.parseMode);
           delivery = 'SENT';
         } else if (process.env.V2_TELEGRAM_ENABLED === 'true') {
           delivery = 'CHAT_NOT_LINKED';
@@ -54,7 +55,7 @@ export class NotificationServiceV2 {
           const owners = await tx.find(V2User, { where: { telegramChatId: reply.chatId, active: true }, take: 2 });
           if (owners.length !== 1 || owners[0].id !== reply.userId) return;
         } else if (reply.kind !== 'HELP') return;
-        await this.telegram.send(reply.chatId, reply.text);
+        await this.telegram.send(reply.chatId, reply.text, reply.parseMode);
         this.logger.log(JSON.stringify({ event: 'telegram_reply_sent', eventId: event.eventId }));
       });
     });
@@ -78,7 +79,13 @@ export class NotificationServiceV2 {
             {
               userId: row.userId,
               kind: 'DAILY_SUMMARY',
-              text: `PAPER resumen UTC ${day}: ${closed.length} cierres, neto ${net.toFixed(4)} USDT`,
+              parseMode: 'HTML',
+              text: ['📅 <b>VolBot · Resumen diario</b>',
+                `${telegramLabel(state.account.executionMode ?? 'PAPER')} · ${day} (UTC)`, '',
+                `Operaciones cerradas: <b>${closed.length}</b>`,
+                `${net > 0 ? '🟢' : net < 0 ? '🔴' : '⚪'} Resultado neto: <b>${net.toFixed(4)} USDT</b>`, '',
+                '📊 Ver cuenta: /resumen · 📂 Ver posiciones: /abiertas',
+              ].join('\n'),
             },
             `daily:${day}`,
           );

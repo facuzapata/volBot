@@ -56,7 +56,7 @@ const server = http.createServer(async (req, res) => {
     if (!body.chat_id || typeof body.text !== 'string' || !body.text.length || body.text.length > 4096)
       return json(400, { ok: false, error_code: 400, description: 'Invalid message' });
     const messages = await read('messages', []);
-    messages.push({ chat_id: body.chat_id, text: body.text });
+    messages.push({ chat_id: body.chat_id, text: body.text, parse_mode: body.parse_mode });
     await write('messages', messages);
     return json(200, { ok: true, result: { message_id: messages.length, date: 1795694400,
       chat: { id: Number(body.chat_id), type: 'private' }, text: body.text } });
