@@ -2,6 +2,8 @@ import { TelegramClient } from '../../src/v2/notifications/telegram.client';
 import { TelegramCommandsService } from '../../src/v2/notifications/telegram-commands.service';
 import { NotificationServiceV2 } from '../../src/v2/notifications/notification.service';
 import { commandHarness, commandUpdate } from './telegram-command.fixtures';
+import { telegramFillNotice } from '../../src/v2/notifications/telegram-trades';
+import { PaperExecutionAdapter } from '../../src/v2/execution/paper-execution.adapter';
 
 const origin = process.env.TELEGRAM_SIMULATION_ORIGIN;
 const suite = origin ? describe : describe.skip;
@@ -56,6 +58,25 @@ suite('Telegram command pipeline against a local HTTP simulation (no real Telegr
     } finally { await receiver.onModuleDestroy(); }
     expect(h.lease.release).toHaveBeenCalled();
   }, 10000);
+  it('sends automatic buy and sell notices with HTML formatting over HTTP', async () => {
+    await control({});
+    const h = commandHarness(), state = h.states.get('a-0')!;
+    const notifications = new NotificationServiceV2(h.store, new TelegramClient(url));
+    const paper = new PaperExecutionAdapter();
+    const exit = paper.requestExit(state, state.positions[0].id, Date.now(), 'TAKE_PROFIT')!;
+    paper.execute(state, exit.id, 102000, Date.now(), 1);
+    for (const fill of state.fills) {
+      await notifications.deliver({ topic: 'notification.requested.v1', eventId: fill.id,
+        key: 'u-a', correlationId: fill.orderId, schemaVersion: 1, occurredAt: new Date().toISOString(),
+        payload: { userId: 'u-a', kind: `SIMULATED_${fill.side}`,
+          ...telegramFillNotice(fill, state.positions[0], state.orders.find((o) => o.id === fill.orderId)) } });
+    }
+    const messages = (await serverState()).messages;
+    expect(messages).toHaveLength(2);
+    expect(messages.every((message) => message.chat_id === '111' && message.parse_mode === 'HTML')).toBe(true);
+    expect(messages[0].text).toContain('<b>Compra ejecutada</b>');
+    expect(messages[1].text).toContain('<b>Venta ejecutada</b>');
+  });
   it.each(['conflict', 'html-error', 'unauthorized'])('sanitizes %s failures without exposing the token', async (scenario) => {
     await control({ scenario });
     const client = new TelegramClient(url);

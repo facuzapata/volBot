@@ -169,6 +169,9 @@ describe('V6 dynamic take profit with chronological sampled prices', () => {
     const notifications = emit.mock.calls.filter((call) => call[1] === 'notification.requested.v1');
     expect(notifications.filter((call) => (call[3] as { kind: string }).kind === 'DYNAMIC_TP_ACTIVATED')).toHaveLength(1);
     expect(notifications.filter((call) => (call[3] as { kind: string }).kind === 'DYNAMIC_TP_EXIT_REQUESTED')).toHaveLength(1);
+    for (const call of notifications) {
+      expect(call[3]).toMatchObject({ parseMode: 'HTML', text: expect.stringContaining('<b>') });
+    }
     expect(upsert.mock.calls.some(([value]) => value.data.dynamicTakeProfit?.phase === 'SELL_ORDER_PENDING')).toBe(true);
     expect(context.state.orders.filter((order) => order.side === 'SELL')).toHaveLength(1);
   });

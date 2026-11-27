@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { AccountState, CausalLiquidityBudget } from '../domain/model';
 import { causalLiquidity } from '../execution/causal-liquidity';
+import { telegramClosedNotice, telegramDynamicNotice, telegramFillNotice } from '../notifications/telegram-trades';
 import { DomainEvent, Payloads, Topic } from '../events/contracts';
 import {
   ExchangeOrderRow,
@@ -134,12 +135,12 @@ export class StoreService {
         if (p.dynamicTakeProfit?.activatedAt !== undefined && previous?.dynamicTakeProfit?.activatedAt === undefined)
           await this.emit(tx, 'notification.requested.v1', state.account.userId, {
             userId: state.account.userId, kind: 'DYNAMIC_TP_ACTIVATED',
-            text: `PAPER ${p.strategy} seguimiento dinámico activado; objetivo mínimo ${p.dynamicTakeProfit.originalTarget} USDT; posición ${p.id}`,
+            ...telegramDynamicNotice(p, false),
           }, p.signalId, `${p.id}:dynamic-tp-activated`);
         if (p.dynamicTakeProfit?.exitRequestedAt !== undefined && previous?.dynamicTakeProfit?.exitRequestedAt === undefined)
           await this.emit(tx, 'notification.requested.v1', state.account.userId, {
             userId: state.account.userId, kind: 'DYNAMIC_TP_EXIT_REQUESTED',
-            text: `PAPER ${p.strategy} venta LIMIT solicitada; piso ${p.dynamicTakeProfit.originalTarget} USDT; máximo observado ${p.dynamicTakeProfit.peak} USDT. Pendiente hasta ejecución; posición ${p.id}`,
+            ...telegramDynamicNotice(p, true),
           }, p.signalId, `${p.id}:dynamic-tp-exit-requested`);
         await this.emit(
           tx,
@@ -159,7 +160,7 @@ export class StoreService {
             {
               userId: state.account.userId,
               kind: Number(p.realizedPnl) >= 0 ? 'SIMULATED_PROFIT' : 'CONTROLLED_LOSS',
-              text: `PAPER BTCUSDT ${p.exitReason}: neto ${Number(p.realizedPnl).toFixed(4)} USDT; posición ${p.id}`,
+              ...telegramClosedNotice(p),
             },
             p.signalId,
           );
@@ -172,7 +173,7 @@ export class StoreService {
           {
             userId: state.account.userId,
             kind: `SIMULATED_${f.side}`,
-            text: `PAPER ${f.side} BTCUSDT ${f.quantity} @ ${f.price}; importe ${f.quote} USDT; comisión ${f.commission} ${f.commissionAsset ?? 'USDT'}`,
+            ...telegramFillNotice(f, state.positions.find((p) => p.id === f.positionId), state.orders.find((o) => o.id === f.orderId)),
           },
           f.orderId,
         );

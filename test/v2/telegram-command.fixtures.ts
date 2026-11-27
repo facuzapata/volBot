@@ -34,6 +34,12 @@ export function commandHarness() {
     query: jest.fn().mockImplementation(async (sql: string) => sql.includes('pg_try_advisory_lock') ? [{ acquired: true }] : []),
     release: jest.fn().mockResolvedValue(undefined), isReleased: false };
   const tx = {
+    findOneByOrFail: async (entity: unknown, where: { id: string }) => {
+      if (entity !== V2User) throw new Error('UNEXPECTED_ENTITY');
+      const user = users.find((user) => user.id === where.id);
+      if (!user) throw new Error('USER_NOT_FOUND');
+      return user;
+    },
     find: jest.fn(async (entity: unknown, options: { where: { telegramChatId: string; active: boolean }; take: number }) => {
       if (entity !== V2User || options.take !== 2 || options.where.active !== true) throw new Error('UNSCOPED_USER_LOOKUP');
       return users.filter((user) => user.active && user.telegramChatId === options.where.telegramChatId).slice(0, 2);

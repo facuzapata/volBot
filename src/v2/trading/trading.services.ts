@@ -25,6 +25,7 @@ import { StrategyApprovalService, configurationHash } from '../strategy/approval
 import { revisionFor, strategyConfiguration } from '../strategy/versions';
 import { shouldPublishSignal } from '../strategy/signal-cadence';
 import { BTC_V5_FIVE_MINUTE_HISTORY } from '../strategy/btc-v5.config';
+import { telegramOrderErrorNotice, telegramSignalNotice, telegramUnprotectedNotice } from '../notifications/telegram-trades';
 
 export function alignedHistory(
   history: MarketHistory,
@@ -72,7 +73,7 @@ export class RiskManagerService {
           {
             userId: s.account.userId,
             kind: 'SIGNAL_DETECTED',
-            text: `PAPER señal ${signal.strategy} BTCUSDT; reserva ${order.reservedQuote} USDT`,
+            ...telegramSignalNotice(signal, order),
           },
           signal.id,
         );
@@ -132,7 +133,7 @@ export class ExecutionEngineService {
             {
               userId: s.account.userId,
               kind: 'EXECUTION_ERROR',
-              text: `PAPER orden ${orderId}: ${o.status} ${o.rejection || ''}`,
+              ...telegramOrderErrorNotice(o),
             },
             event.correlationId,
           );
@@ -206,7 +207,7 @@ export class PositionManagerService {
               {
                 userId: s.account.userId,
                 kind: 'UNPROTECTED_POSITION',
-                text: `PAPER posición sin protección ${p.id}`,
+                ...telegramUnprotectedNotice(p),
               },
               event.correlationId,
             );

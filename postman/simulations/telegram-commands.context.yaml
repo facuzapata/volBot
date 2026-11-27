@@ -2,6 +2,13 @@ purpose:
   stands_in_for: Telegram Bot API getMe, getWebhookInfo, getUpdates and sendMessage, with synthetic token and chats only.
   unblocks: Testing read-only account commands, private-chat routing, polling offsets and HTTP error handling without contacting Telegram.
 assumptions:
+  - id: html-trade-notices
+    status: supported
+    claim: Automatic buy and sell notices carry HTML formatting through NotificationServiceV2 and the native HTTP client in the tested local scenario.
+    reason: Real signal and fill producers emitted HTML-mode notifications in unit tests. The existing repository stand-in recorded buy and sell sendMessage requests with bold Spanish titles and parse_mode HTML.
+    verification: On 2026-11-27, 50 unit tests and eight local HTTP simulation tests passed, including a buy and sell delivery. Simulation request logs showed two successful automatic sendMessage calls, in addition to the command reply. PostgreSQL, Kafka and real Telegram rendering were not exercised.
+    source: src/v2/notifications/telegram-trades.ts; src/v2/persistence/store.service.ts; src/v2/trading/trading.services.ts; test/v2/telegram-trades.spec.ts; test/v2/telegram-http.integration-spec.ts
+    updated_at: '2026-11-27'
   - id: html-command-delivery
     status: supported
     claim: New command replies carry parse_mode HTML through the outbox and native HTTP client in the exercised local scenario; older plain-text events remain supported.
@@ -38,6 +45,10 @@ assumptions:
     source: docs/v6-dynamic-take-profit.md; src/v2/notifications/telegram-commands.service.ts
     updated_at: '2026-11-26'
 fingerprints:
+  - id: automatic-trades-local-run
+    date: '2026-11-27'
+    commit: bfbcb95 with uncommitted automatic trade formatting changes; unrelated historical-range work remains outside the change
+    cli: Postman CLI 1.77.0; existing repository Telegram mock reused on port 4017 with synthetic identities. No hosted discovery or real Telegram calls.
   - id: html-command-local-run
     date: '2026-11-27'
     commit: fe402fb8a3106cdcb107c2790d153e44ded5f2b3 with uncommitted Telegram formatting changes and pre-existing unrelated historical-range changes
